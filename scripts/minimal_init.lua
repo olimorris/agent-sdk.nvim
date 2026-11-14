@@ -1,0 +1,4 @@
+vim.opt.runtimepath:append(vim.fn.getcwd())
+vim.opt.runtimepath:append(vim.fn.getcwd() .. "/deps/mini.nvim")
+
+require("mini.test").setup()

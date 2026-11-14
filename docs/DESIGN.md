@@ -1,0 +1,157 @@
+# agent-sdk.nvim design
+
+Every Neovim plugin that wants to talk to an LLM or an agent has to build its own HTTP adapters, ACP client and credential handling. Users then configure the same API keys and models once per plugin.
+
+agent-sdk.nvim is a headless library that does this once. Users configure their adapters in one place, and any plugin built on the SDK can use them by name.
+
+## Status
+
+- Beta. Liable to break, and the README says so
+- Built for Oli's plugins first, starting with [bottleneck.nvim](../bottleneck.nvim), then for other plugin authors
+- Requires Neovim nightly (0.13-dev) because it is built on `vim.async`
+- The Lua module is `agent_sdk`
+- `README.md` holds a sketch of the API. `INTEGRATING.md` is the full reference, written for a plugin author to hand to their coding agent
+
+## Relationship to CodeCompanion
+
+- A new repo, started from CodeCompanion's adapter code. That layer has been stable for over a year
+- CodeCompanion stays as it is until the SDK settles. It then adopts the SDK, with a shim for its existing adapters
+- Plugins already reach into CodeCompanion's internals as an unofficial SDK (VectorCode, codecompanion-history and codecompanion-fast-apply use `codecompanion.http`; the `cc-adapter-*` plugins use `codecompanion.adapters`). The SDK gives them a supported API to move to
+
+## The user
+
+- Configures adapters, credentials and models once, in `setup({ adapters = ... })`
+- Credentials work as in CodeCompanion: environment variables, `cmd:` for password managers, and functions
+- Adds third-party adapters in their own setup (`adapters = { vertex = require("vertex-adapter") }`). A plugin never registers an adapter itself
+- Extends a built-in adapter with `require("agent_sdk.adapters").extend(...)`, as in CodeCompanion. A string (`claude_code = "claude_code"`) uses a built-in adapter unchanged
+
+## Plugins
+
+- Refer to adapters by the name the user gave them. `sdk.adapter(name)` returns the adapter, or `nil, err` with an error the plugin can show the user
+- Take the user's choice as one `adapter` option: a name, or `{ name = ..., model = ... }`
+- May override the model for a session
+- May read an adapter's `name`, `type` (`"http"` or `"acp"`) and capabilities (tools, vision, reasoning, models). Capabilities are read-only
+- `capabilities.models` is empty until the SDK knows the models: for an ACP agent, until a session has started; for Ollama, until the SDK has asked the server
+- `adapter:has_model(model)` returns `false` only when the adapter knows its models and `model` isn't one of them, so a plugin never warns about a model it can't check yet
+- May deep copy an adapter's config and change the copy. They can never change the user's config
+
+## Scope
+
+The SDK is the connection layer only:
+
+- No agent loop. Plugins decide what every tool call does and when to stop. The SDK only sends the plugin's results back
+- No UI. Plugins own every buffer and window
+- No file or terminal handlers for ACP agents
+
+## Sessions
+
+Every adapter is used through a session and `session:prompt()`.
+
+- `sdk.session({ adapter, model, system_prompt, on })` takes the adapter object, not its name, so a plugin can pass a modified deep copy
+- `sdk.session()` returns straight away. Nothing is sent until the first prompt
+- Handlers in `on` apply to every prompt in the session. Handlers passed to `session:prompt()` replace the session's handler for that event, for that prompt only
+- A prompt is a string, or a list of content blocks (`{ type = "text", text = ... }`)
+- `session:prompt()` returns a `vim.async` task. Closing it stops the reply
+- One prompt at a time. Calling `session:prompt()` or `session:ask()` while a reply is in progress raises an error
+- `session:close()` stops any reply in progress and ends the session
+
+### HTTP
+
+- The SDK is the only owner of the history
+- The plugin sends prompts and tool results. The SDK adds the assistant's reply to the history when the request is done
+- Plugins read `session.messages` and change it only with `session:set_messages(...)`
+- History is stored in CodeCompanion's provider-neutral message format and converted per adapter on every request
+- Reasoning blocks (Anthropic signatures, OpenAI encrypted reasoning) are stored exactly as received and sent back unchanged
+- Tool call ids must pair up within each request, as some adapters re-mint ids for historical tool calls
+
+### ACP
+
+- The agent owns its history. `session.messages` is a read-only record of what the SDK saw, as in CodeCompanion, and is never sent back to the agent
+- `session:set_messages(...)` changes nothing and returns `false, err`. It doesn't raise, so a plugin that was only tested on HTTP keeps working on an agent
+- One agent process per session, started on the first prompt. The SDK kills it when the session ends and on `VimLeavePre`
+- `system_prompt` is added to the agent's own instructions. On HTTP, it is the whole system prompt
+- An agent is told it can read files, write files or run terminals only when the plugin has declared handlers for them. Requests without a handler are rejected
+- Permission requests with no plugin handler are rejected
+- A `permission_request` gives the plugin `request.tool_call`, `request.options` and `request.respond(option_id)`. Option fields are snake_case (`option.id`, not ACP's `optionId`). `request.respond(nil)` cancels
+- The agent waits until the handler calls `request.respond()`. A handler that never responds leaves the reply hanging, and the docs say so
+
+## Events
+
+Every adapter emits the same events, so plugins never see provider-specific chunks:
+
+- `text`
+- `reasoning`
+- `tool_call`
+- `usage`
+- `done`
+- `error`
+- `permission_request` (ACP)
+
+Every adapter supports `stream = false`. The plugin gets the same events in one burst once the reply is complete, so its code doesn't change between modes. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Where a provider supports only one mode, the SDK covers the other: it collects a stream into one reply, or sends a complete reply as one burst of events.
+
+Tool calls are passed straight through to the plugin as `tool_call` events.
+
+- A prompt isn't done while a tool call is unanswered. The plugin answers on the event with `call.respond(content)` or `call.fail(message)`
+- When every call in a reply is answered, the SDK sends the results and the same prompt carries on. The plugin sees one `done`, with the whole answer, as it does on ACP
+- The SDK pairs the ids, so the history never holds a tool call without its result
+- A `tool_call` handler that never answers leaves the reply hanging, the same rule as `permission_request`. With no handler, the SDK fails the call
+- On ACP the agent runs the tool itself, so `call.respond` and `call.fail` do nothing
+
+- Every handler receives an event table (`event.text`, `event.message`), so every event has the same shape
+- Handlers run on the main loop, so they can write to buffers and windows directly
+- Every prompt ends with exactly one `done` or one `error`
+- `done` receives the whole reply: `reply.text`, `reply.reasoning` and `reply.usage`. `done` always means a reply was added to the history
+- Stopping a reply ends the prompt with an `error` whose `event.cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
+- A prompt that ends in `error` adds nothing to the history, not even the prompt itself. The `error` event carries it as `event.prompt`, so the plugin can send it again or return it to the user
+- `tool_call` events carry `needs_result`. It is `true` on HTTP, where the plugin owes a result, and `false` on ACP, where the agent runs the tool itself
+- `reply.tool_calls` lists every tool call in the prompt, and `reply.usage` adds up every request the prompt made
+
+## Async
+
+- Built on `vim.async`
+- Events and callbacks are the base API
+- A coroutine wrapper lets a plugin write `local reply, err = session:ask(...)`. It returns `reply, err` rather than raising like `vim.async.await`, as that reads better at the call site
+- The session's handlers still run during `session:ask()`, so a buffer can stream while the task waits. Closing the task stops the reply
+
+## Adapters
+
+- Keep CodeCompanion's adapter structure (schema, handlers, `env`)
+- Rename handlers and group them into sections (reasoning, tool calling, and so on). Work this out while building
+- An adapter is included only if it needs code beyond config
+- OpenRouter is the one exception and ships as its own adapter because of its scale. It extends `openai_compatible`
+- `openai_compatible` is the base for everything else. Providers like Novita are config examples in the docs, not adapters
+- HTTP: Anthropic, OpenAI Responses, OpenAI Chat Completions, `openai_compatible`, Gemini, Ollama, OpenRouter. Copilot is still to decide, as its token exchange is vendor-specific
+- ACP: one generic adapter that takes a command, plus presets for Claude Code, Codex and Gemini CLI
+
+## Testing
+
+The SDK ships a public test adapter that replays a scripted stream of events, so plugin authors can test without API keys or network calls.
+
+- `require("agent_sdk.test").adapter({ replies = ... })`. Each entry in `replies` is the reply to one request. A prompt whose reply has a tool call makes a second request once the call is answered
+- Each reply ends with an explicit `done` or `error`, so a test can script either
+- `type = "acp"` scripts an agent: `permission_request` events, and `session:set_messages()` returning `false, err`
+- `scripted.responses` lists the option ids the plugin's permission handlers responded with
+- Tests add the test adapter through `agent_sdk.setup()`, standing in for the user
+
+## Open
+
+- Handler naming and sections
+- When CodeCompanion moves onto the SDK, and what its shim looks like
+- Moving the plugins that use `codecompanion.http` and `codecompanion.adapters` to the SDK
+- How a plugin gives the model its tool definitions on HTTP
+- The API for declaring file and terminal handlers for ACP agents
+
+## Further ahead
+
+Ideas only. Not designed yet.
+
+- **Tool definitions:** plugins send their own. System prompts are already a session option
+- **Skills:** users define skills, and plugin authors can ship skills with their plugin. How they are included in a request is still to work out. Skills plus curated tool definitions would let a plugin author ship a well-tuned plugin
+- **Agent cards:** like a model card, every plugin built on the SDK publishes one. It states the tools it runs on the user's machine and the risk of each
+- **Safety:** the SDK makes it easy for a plugin to have an agent run tools on the user's machine. A malicious plugin could use that to take control of it. Agent cards are one part of the answer, and this needs a lot of care
+
+## Next step
+
+1. Write the call sites for the two open APIs (tool results on HTTP, file and terminal handlers on ACP) from a plugin that uses tools, before building sessions
+2. Build one working slice: the test adapter, then sessions and events, then the Anthropic adapter, then the Claude Code preset
+3. Build bottleneck.nvim against the test adapter in parallel. Rewrite the README's examples from that experience, as the current ones are a sketch
