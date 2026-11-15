@@ -1,0 +1,1 @@
+{"id":"msg_01","type":"message","role":"assistant","model":"claude-opus-5-5","content":[{"type":"thinking","thinking":"The nil check moved above the loop.","signature":"EqQBCkYIBxgC"},{"type":"text","text":"Hello"},{"type":"tool_use","id":"toolu_01A","name":"read_file","input":{"path":"lua/foo.lua"}}],"stop_reason":"tool_use","usage":{"input_tokens":25,"output_tokens":85}}
