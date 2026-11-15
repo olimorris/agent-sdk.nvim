@@ -1,11 +1,11 @@
 ---
-title: "Install Agent SDK"
+title: "Add Agent SDK to your plugin"
 sidebarTitle: "Installation"
-description: "Install Agent SDK with your plugin manager. It needs Neovim nightly for vim.async, and curl for HTTP adapters."
+description: "Add Agent SDK as a dependency of your Neovim plugin, and set up an adapter in your own config to try it. Needs Neovim nightly and curl."
 keywords: ["install", "lazy.nvim", "vim.pack", "requirements"]
 ---
 
-Agent SDK is a Lua library with no plugin dependencies. Install it once, and every plugin built on it shares it.
+Agent SDK is a Lua library with no plugin dependencies. Your plugin lists it as a dependency, and your users install it alongside your plugin. Every plugin built on it shares the one install.
 
 ## Requirements
 
@@ -13,33 +13,41 @@ Agent SDK is a Lua library with no plugin dependencies. Install it once, and eve
 - `curl`, for HTTP adapters
 - For ACP adapters, the agent itself. See [Claude Code](/configure/claude-code)
 
-## Install
+Put these in your plugin's README, as your users need them too.
+
+## Add it as a dependency
+
+Tell your users to install Agent SDK with your plugin:
 
 <Tabs>
   <Tab title="vim.pack">
     ```lua
-    vim.pack.add({ "https://github.com/olimorris/agent-sdk.nvim" })
+    vim.pack.add({
+      "https://github.com/olimorris/agent-sdk.nvim",
+      "https://github.com/you/your_plugin",
+    })
     ```
   </Tab>
   <Tab title="lazy.nvim">
     ```lua
-    { "olimorris/agent-sdk.nvim" }
+    {
+      "you/your_plugin",
+      dependencies = { "olimorris/agent-sdk.nvim" },
+    }
     ```
   </Tab>
 </Tabs>
 
-A plugin built on the SDK may list it as a dependency, in which case your plugin manager installs it for you.
+## Set up an adapter to develop with
 
-## Configure
-
-Call `setup()` with your adapters:
+Your plugin uses whichever adapter the user names, so you need one of your own to try it. Add one to your Neovim config:
 
 ```lua
 require("agent_sdk").setup({
   adapters = {
-    anthropic = "anthropic",
+    claude_code = "claude_code",
   },
 })
 ```
 
-Then [configure your adapters](/configure/adapters).
+See [Configure adapters](/configure/adapters) for credentials and every other option. Then build your first plugin with the [quickstart](/build/quickstart), or by hand with the [chat plugin walkthrough](/walkthroughs/chat-plugin).

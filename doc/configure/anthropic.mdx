@@ -1,11 +1,11 @@
 ---
 title: "Configure the Anthropic adapter"
 sidebarTitle: "Anthropic"
-description: "Connect Agent SDK to Anthropic's Messages API. Set your API key, default model, extended thinking and max tokens."
+description: "Connect Agent SDK to Anthropic's Messages API. Set the API key, default model, extended thinking and max tokens."
 keywords: ["anthropic", "claude", "messages api", "extended thinking"]
 ---
 
-The `anthropic` adapter talks to Anthropic's Messages API over HTTP. By default it reads your key from the `ANTHROPIC_API_KEY` environment variable.
+The `anthropic` adapter talks to Anthropic's Messages API over HTTP. By default it reads the user's key from the `ANTHROPIC_API_KEY` environment variable.
 
 ```lua
 require("agent_sdk").setup({

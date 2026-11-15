@@ -1,24 +1,37 @@
 ---
 title: "AgentSDK.nvim"
 sidebarTitle: "Introduction"
-description: "Connect Neovim plugins to LLMs and agents"
+description: "A Lua library that connects your Neovim plugin to LLMs and agents"
 keywords: ["neovim", "llm", "acp", "agent", "sdk", "lua"]
 ---
 
-Every plugin that talks to an LLM builds its own adapters and credential handling, so you set up the same API keys once per plugin. With Agent SDK, you set them up once and every plugin uses them by name.
+Every Neovim plugin that talks to an LLM writes its own HTTP client, stream parser, history and credential handling. Its users then set up their API keys again, once per plugin.
+
+Agent SDK does that work once. Your plugin decides what to send and what to show.
 
 <Warning>
 Beta, and the API may change. Requires Neovim nightly (0.13-dev).
 </Warning>
 
-## Features
+## What it is
 
-- Configure adapters, credentials and models once, for every plugin
-- Talk to LLMs over HTTP and to agents over [ACP](https://agentclientprotocol.com), with one API
-- Stream replies, or get them whole, with the same handlers
-- Keep the conversation history for you
-- Read API keys from environment variables, files or a password manager
-- Test plugins with a scripted adapter, with no network or API keys
+A Lua library that connects your plugin to LLMs over HTTP, and to agents like Claude Code over [ACP](https://agentclientprotocol.com). You start a session with the adapter your user picked, send it prompts, and the replies arrive in your handlers.
+
+## Why use it
+
+- The user sets up adapters and API keys once, and your plugin uses them by name
+- One API for HTTP and ACP. Code written against one works on the other
+- Replies stream into the same handlers, whether you stream or wait for the whole reply
+- The SDK keeps the conversation history
+- Tool calls and permission requests arrive as requests for your plugin to answer
+- A scripted test adapter, so your tests need no network or API keys
+
+## What you can build
+
+- A chat buffer that talks to Claude Code
+- An "explain this selection" command
+- A reviewer that comments on your current diff
+- A commit message writer
 
 ## What it isn't
 
@@ -30,10 +43,10 @@ The SDK is the connection layer only. Your plugin owns everything else:
 ## Where to start
 
 <Columns cols={2}>
-  <Card title="Configure your adapters" icon="sliders-horizontal" href="/configure/adapters">
-    You use a plugin built on the SDK. Set up your API keys and agents once.
-  </Card>
   <Card title="Build a plugin" icon="code" href="/build/quickstart">
-    You're writing a plugin. Start a session and stream your first reply.
+    Give your coding agent one prompt and describe what to build.
+  </Card>
+  <Card title="Reference" icon="book-open" href="/reference/api">
+    Every function, handler and field.
   </Card>
 </Columns>

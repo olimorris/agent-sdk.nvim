@@ -31,31 +31,46 @@
     "groups": [
       {
         "group": "Get started",
-        "pages": ["index", "installation"]
+        "pages": [
+          "index",
+          "concepts",
+          "installation"
+        ]
       },
       {
         "group": "Configure",
-        "pages": ["configure/adapters", "configure/anthropic", "configure/claude-code"]
+        "pages": [
+          "configure/adapters",
+          "configure/anthropic",
+          "configure/claude-code"
+        ]
       },
       {
         "group": "Build a plugin",
         "pages": [
           "build/quickstart",
-          "build/sessions",
-          "build/tool-calls",
-          "build/permissions",
-          "build/errors",
-          "build/testing",
           "build/integrating"
         ]
       },
       {
         "group": "Walkthroughs",
-        "pages": ["walkthroughs/http-reply", "walkthroughs/agent-reply"]
+        "pages": [
+          "walkthroughs/chat-plugin",
+          "walkthroughs/http-reply",
+          "walkthroughs/agent-reply"
+        ]
       },
       {
         "group": "Reference",
-        "pages": ["reference/api", "reference/http-and-acp"]
+        "pages": [
+          "reference/api",
+          "build/sessions",
+          "build/tool-calls",
+          "build/permissions",
+          "build/errors",
+          "build/testing",
+          "reference/http-and-acp"
+        ]
       }
     ]
   }

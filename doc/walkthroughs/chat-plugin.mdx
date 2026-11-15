@@ -1,0 +1,337 @@
+---
+title: "Build a chat plugin"
+sidebarTitle: "A chat plugin"
+description: "Build a working Neovim chat plugin on Agent SDK in under 100 lines: let the user pick an adapter, stream replies into a buffer, stop a reply and close the session."
+keywords: ["walkthrough", "plugin", "chat", "session", "prompt", "streaming"]
+---
+
+This page builds a chat plugin in 97 lines of Lua. `:AgentChat` opens a chat buffer. The user writes under `## You` and presses `<CR>`, and the reasoning and answer stream in. `<C-c>` stops a reply, and closing the window ends the chat.
+
+Agent SDK handles the adapter, credentials, history and transport. Your plugin owns the buffer, the keymaps and what it does with each reply.
+
+New to LLMs and agents? Read [Core concepts](/concepts) first.
+
+## What your user has already done
+
+Before your plugin runs, your user has installed Agent SDK and set up their adapters in their own config:
+
+```lua
+require("agent_sdk").setup({
+  adapters = {
+    claude_code = require("agent_sdk.adapters").extend("claude_code", {
+      env = {
+        CLAUDE_CODE_OAUTH_TOKEN = "cmd:op read op://Private/Claude_Code/credential --no-newline",
+      },
+    }),
+  },
+})
+```
+
+`claude_code` is their name for the adapter. The token comes from their password manager. Your plugin never sees this config. It only asks for `claude_code` by name.
+
+To try your plugin yourself, add an adapter to your own config. See [Installation](/installation#set-up-an-adapter-to-develop-with).
+
+## Build the plugin
+
+Everything goes in one file, `lua/your_plugin.lua`.
+
+<Steps>
+  <Step title="Let the user pick an adapter">
+    Your plugin doesn't define or configure adapters. The user sets them up once in `agent_sdk.setup()`, as above, and every plugin built on Agent SDK shares them. That way your plugin works with any adapter Agent SDK supports, HTTP or ACP, and never touches a credential.
+
+    All your plugin needs is an `adapter` option for the user to name the one they want. It has no default, as your plugin can't know which adapters the user has set up:
+
+    ```lua
+    local sdk = require("agent_sdk")
+
+    local M = {}
+
+    local config = {}
+    ```
+
+    The user then names their adapter when they set up your plugin:
+
+    ```lua
+    require("your_plugin").setup({ adapter = "claude_code" })
+    ```
+
+    `setup()` stores the option and adds the `:AgentChat` command. `:AgentChat other_adapter` opens a chat with any other adapter the user has set up:
+
+    ```lua
+    function M.setup(opts)
+      config = vim.tbl_extend("force", config, opts or {})
+
+      vim.api.nvim_create_user_command("AgentChat", function(args)
+        chat(args.args ~= "" and args.args or config.adapter)
+      end, { nargs = "?", desc = "Chat with an Agent SDK adapter" })
+    end
+    ```
+
+    Link to [Configure adapters](/configure/adapters) from your README so users know where to set them up.
+  </Step>
+  <Step title="Resolve the adapter">
+    Your plugin holds a name, if the user gave one. `sdk.adapter()` turns it into the adapter itself: it looks the name up in the user's config and returns a copy your plugin can use. If the user hasn't set up an adapter by that name, it returns an error to show them:
+
+    ```lua
+    local function chat(name)
+      if not name then
+        return vim.notify("your_plugin: set an adapter in setup(), or run :AgentChat {adapter}", vim.log.levels.ERROR)
+      end
+
+      local adapter, err = sdk.adapter(name)
+      if not adapter then
+        return vim.notify(err, vim.log.levels.ERROR)
+      end
+    ```
+
+    Credentials aren't read yet. The SDK reads them on the first prompt, so the user's password manager only asks when it's needed. A missing or rejected key ends that prompt in an `error`.
+
+    Resolve when a chat opens, not in your plugin's setup, as the user may call `agent_sdk.setup()` after yours.
+  </Step>
+  <Step title="Open a chat buffer">
+    Agent SDK has no UI, so the buffer is yours. This is plain Neovim: a markdown scratch buffer, an `append` that writes text at the end, and a `heading` that adds a heading once when the reply moves to a new part:
+
+    ```lua
+    vim.cmd("vnew | setlocal buftype=nofile bufhidden=wipe filetype=markdown")
+    local buf = vim.api.nvim_get_current_buf()
+
+    local section, task
+
+    local function append(text)
+      local last = vim.api.nvim_buf_line_count(buf) - 1
+      local col = #vim.api.nvim_buf_get_lines(buf, last, last + 1, false)[1]
+      vim.api.nvim_buf_set_text(buf, last, col, last, col, vim.split(text, "\n", { plain = true }))
+      pcall(vim.api.nvim_win_set_cursor, vim.fn.bufwinid(buf), { vim.api.nvim_buf_line_count(buf), 0 })
+    end
+
+    local function heading(text)
+      if section ~= text then
+        section = text
+        append((vim.api.nvim_buf_get_lines(buf, -2, -1, false)[1] == "" and "" or "\n\n") .. text .. "\n\n")
+      end
+    end
+    ```
+
+    `task` will hold the reply in progress.
+  </Step>
+  <Step title="Start a session">
+    A [session](/build/sessions) is one conversation. It keeps the history, so each prompt carries on from the last. One chat buffer is one session. Give it the adapter and your handlers, which run for every prompt in the session:
+
+    ```lua
+    local session = sdk.session({
+      adapter = adapter,
+      on = {
+        reasoning = function(event)
+          heading("### Reasoning")
+          append(event.text)
+        end,
+        text = function(event)
+          heading("### Answer")
+          append(event.text)
+        end,
+        done = function()
+          task = nil
+          heading("## You")
+        end,
+        error = function(event)
+          task = nil
+          heading(event.cancelled and "_Stopped_" or ("**Error:** " .. event.message))
+          heading("## You")
+        end,
+      },
+    })
+    ```
+
+    - `reasoning` runs for each piece of the model's [reasoning](/concepts#reasoning), if it produces any
+    - `text` runs for each piece of the answer as it [streams](/concepts#streaming)
+    - `done` runs once when the reply is complete
+    - `error` runs instead of `done` when the prompt fails or is stopped
+
+    Every prompt ends in exactly one `done` or one `error`, so both clear `task` and add a new `## You` for the next prompt. Other handlers give you [tool calls](/build/tool-calls), [permission requests](/build/permissions) and token usage. See [every handler](/reference/api#events).
+
+    `sdk.session()` returns straight away. Nothing is sent until the first prompt.
+  </Step>
+  <Step title="Send a prompt">
+    `<CR>` sends everything under the last `## You`:
+
+    ```lua
+    local function send()
+      local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      local start = #lines
+      while lines[start] ~= "## You" do
+        start = start - 1
+      end
+      local prompt = vim.trim(table.concat(lines, "\n", start + 1))
+
+      if prompt ~= "" and not task then
+        heading("## Agent")
+        task = session:prompt(prompt)
+      end
+    end
+
+    vim.keymap.set("n", "<CR>", send, { buffer = buf, desc = "Send the prompt" })
+    ```
+
+    `session:prompt()` returns a task straight away, and the reply arrives in your handlers. The `not task` check skips a send while a reply is still streaming.
+  </Step>
+  <Step title="Stop a reply">
+    Closing the task stops the reply:
+
+    ```lua
+    vim.keymap.set("n", "<C-c>", function()
+      return task and task:close()
+    end, { buffer = buf, desc = "Stop the reply" })
+    ```
+
+    A stopped prompt ends in `error` with `event.cancelled` set to `true`, so the chat shows `_Stopped_`. It adds nothing to the history.
+  </Step>
+  <Step title="Close the session">
+    When the buffer goes, so does the conversation. For an ACP agent like `claude_code`, closing the session also stops the agent's process:
+
+    ```lua
+    vim.api.nvim_create_autocmd("BufWipeout", {
+      buffer = buf,
+      callback = function()
+        session:close()
+      end,
+    })
+    ```
+
+    Finally, `chat()` adds the first `## You` and starts insert mode, ready for the first prompt:
+
+    ```lua
+      heading("## You")
+      vim.cmd.startinsert()
+    end
+    ```
+  </Step>
+</Steps>
+
+## The whole plugin
+
+<Accordion title="lua/your_plugin.lua">
+```lua
+local sdk = require("agent_sdk")
+
+local M = {}
+
+local config = {}
+
+local function chat(name)
+  if not name then
+    return vim.notify("your_plugin: set an adapter in setup(), or run :AgentChat {adapter}", vim.log.levels.ERROR)
+  end
+
+  local adapter, err = sdk.adapter(name)
+  if not adapter then
+    return vim.notify(err, vim.log.levels.ERROR)
+  end
+
+  vim.cmd("vnew | setlocal buftype=nofile bufhidden=wipe filetype=markdown")
+  local buf = vim.api.nvim_get_current_buf()
+
+  local section, task
+
+  local function append(text)
+    local last = vim.api.nvim_buf_line_count(buf) - 1
+    local col = #vim.api.nvim_buf_get_lines(buf, last, last + 1, false)[1]
+    vim.api.nvim_buf_set_text(buf, last, col, last, col, vim.split(text, "\n", { plain = true }))
+    pcall(vim.api.nvim_win_set_cursor, vim.fn.bufwinid(buf), { vim.api.nvim_buf_line_count(buf), 0 })
+  end
+
+  local function heading(text)
+    if section ~= text then
+      section = text
+      append((vim.api.nvim_buf_get_lines(buf, -2, -1, false)[1] == "" and "" or "\n\n") .. text .. "\n\n")
+    end
+  end
+
+  local session = sdk.session({
+    adapter = adapter,
+    on = {
+      reasoning = function(event)
+        heading("### Reasoning")
+        append(event.text)
+      end,
+      text = function(event)
+        heading("### Answer")
+        append(event.text)
+      end,
+      done = function()
+        task = nil
+        heading("## You")
+      end,
+      error = function(event)
+        task = nil
+        heading(event.cancelled and "_Stopped_" or ("**Error:** " .. event.message))
+        heading("## You")
+      end,
+    },
+  })
+
+  local function send()
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local start = #lines
+    while lines[start] ~= "## You" do
+      start = start - 1
+    end
+    local prompt = vim.trim(table.concat(lines, "\n", start + 1))
+
+    if prompt ~= "" and not task then
+      heading("## Agent")
+      task = session:prompt(prompt)
+    end
+  end
+
+  vim.keymap.set("n", "<CR>", send, { buffer = buf, desc = "Send the prompt" })
+  vim.keymap.set("n", "<C-c>", function()
+    return task and task:close()
+  end, { buffer = buf, desc = "Stop the reply" })
+
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = buf,
+    callback = function()
+      session:close()
+    end,
+  })
+
+  heading("## You")
+  vim.cmd.startinsert()
+end
+
+function M.setup(opts)
+  config = vim.tbl_extend("force", config, opts or {})
+
+  vim.api.nvim_create_user_command("AgentChat", function(args)
+    chat(args.args ~= "" and args.args or config.adapter)
+  end, { nargs = "?", desc = "Chat with an Agent SDK adapter" })
+end
+
+return M
+```
+</Accordion>
+
+## Try it
+
+Set up your plugin in your config, after `agent_sdk.setup()`:
+
+```lua
+require("your_plugin").setup({ adapter = "claude_code" })
+```
+
+Run `:AgentChat`, write a question under `## You`, then press `<Esc>` and `<CR>` to send it.
+
+<Note>
+This chat has no permission handler, so the SDK rejects every request the agent makes to read files or run commands. To let it, add a [permission policy](/build/permissions).
+</Note>
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Permissions" icon="shield-check" href="/build/permissions">
+    Let the agent read files, and decide what else it's allowed to do.
+  </Card>
+  <Card title="Sessions and prompts" icon="messages-square" href="/build/sessions">
+    Wait for a reply in a task, pick a model and read the history.
+  </Card>
+</Columns>

@@ -5,25 +5,42 @@ description: "Set up LLM and agent adapters once in Agent SDK, store API keys in
 keywords: ["adapters", "setup", "credentials", "api key", "env", "1password"]
 ---
 
-You set up your adapters once, in Agent SDK. Every plugin built on it then picks one by name.
+Your plugin never chooses an adapter. Your users set up their adapters once, in Agent SDK, then tell your plugin which one to use by name.
+
+```mermaid
+flowchart LR
+    A["The user's config<br/>agent_sdk.setup()"] -->|"defines anthropic<br/>and claude_code"| B["Agent SDK"]
+    A -->|"adapter = #quot;anthropic#quot;"| C["Your plugin"]
+    C -->|"sdk.adapter(#quot;anthropic#quot;)"| B
+```
+
+First, the user sets up their adapters in their own config:
 
 ```lua
 require("agent_sdk").setup({
   adapters = {
     anthropic = require("agent_sdk.adapters").extend("anthropic", {
-      env = { api_key = "cmd:op read op://Private/Anthropic_API/credential --no-newline" },
+      env = {
+        api_key = "cmd:op read op://Private/Anthropic_API/credential --no-newline",
+      },
     }),
     claude_code = "claude_code",
   },
 })
-
-require("some_plugin").setup({ adapter = "anthropic" })
-require("other_plugin").setup({ adapter = { name = "claude_code", model = "sonnet" } })
 ```
 
-The key is your name for the adapter. A string uses a built-in adapter as it ships. `extend()` copies a built-in adapter and overrides any part of it.
+Then, in the same config, they set up your plugin and name the adapter it should use:
 
-A plugin never adds an adapter itself. To use a third-party adapter, add it in your own setup:
+```lua
+-- The user picks their anthropic adapter for your plugin
+require("your_plugin").setup({ adapter = "anthropic" })
+```
+
+Your plugin takes that name and [resolves it](/walkthroughs/chat-plugin) with `sdk.adapter()`. Another plugin can use the user's `claude_code` adapter at the same time.
+
+The key is the user's name for the adapter. A string uses a built-in adapter as it ships. `extend()` copies a built-in adapter and overrides any part of it.
+
+A plugin never adds an adapter itself. A user adds a third-party adapter in their own setup:
 
 ```lua
 require("agent_sdk").setup({
@@ -51,7 +68,7 @@ require("agent_sdk").setup({
 | `"file:~/.secrets/anthropic"` | The file's contents |
 | `function(adapter) ... end` | What the function returns |
 
-A `cmd:` runs once and its output is reused, so your password manager asks once. It runs again after an HTTP provider rejects the key with a 401 or 403.
+A `cmd:` runs once and its output is reused, so the password manager asks once. It runs again after an HTTP provider rejects the key with a 401 or 403.
 
 A failing `cmd:` ends the prompt in an error with its stderr:
 
@@ -61,11 +78,13 @@ agent-sdk.nvim: the command `op read op://Private/Anthropic_API/credential` fail
 
 ## Choosing a model in a plugin
 
-A plugin takes your choice as one `adapter` option: a name, or a table with a name and a model.
+Your plugin's `adapter` option can also take a table, so the user can pick a model for your plugin alone:
 
 ```lua
-require("some_plugin").setup({ adapter = "anthropic" })
-require("some_plugin").setup({ adapter = { name = "anthropic", model = "claude-opus-5-5" } })
+-- The user picks their anthropic adapter, with a model other than its default
+require("your_plugin").setup({
+  adapter = { name = "anthropic", model = "claude-opus-5-5" },
+})
 ```
 
-The plugin's `model` replaces the adapter's default model for that plugin's sessions. Your adapter config stays as you set it.
+The `model` replaces the adapter's default model for your plugin's sessions. The user's adapter config stays as they set it.

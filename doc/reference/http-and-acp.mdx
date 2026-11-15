@@ -17,6 +17,20 @@ Your plugin's code is the same for an HTTP model and an ACP agent. The user pick
 | Files and commands | Only through your plugin's tools | The agent reads, writes and runs commands itself, behind [permission requests](/build/permissions) |
 | First reply | Sent straight away | Slower, as the SDK starts the agent's process on the first prompt |
 
+## Supporting only ACP agents
+
+A plugin that needs an agent, such as one that edits files, can refuse HTTP adapters. Check `adapter.type` once the adapter is resolved:
+
+```lua
+local adapter, err = sdk.adapter(config.adapter)
+if not adapter then
+  return vim.notify(err, vim.log.levels.ERROR)
+end
+if adapter.type ~= "acp" then
+  return vim.notify("your_plugin needs an ACP agent, like claude_code", vim.log.levels.ERROR)
+end
+```
+
 ## Agents work from disk
 
 An ACP agent reads files, writes files and runs commands itself. It can't do any of these through Neovim, so it doesn't see unsaved changes.
