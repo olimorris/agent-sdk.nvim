@@ -37,9 +37,11 @@ end
 ---@param name string
 ---@return table?
 local function load_builtin(name)
-  local ok, adapter = pcall(require, "agent_sdk.adapters." .. name)
-  if ok and type(adapter) == "table" then
-    return adapter
+  for _, kind in ipairs({ "http" }) do
+    local ok, adapter = pcall(require, ("agent_sdk.adapters.%s.%s"):format(kind, name))
+    if ok and type(adapter) == "table" then
+      return adapter
+    end
   end
 end
 
@@ -68,7 +70,13 @@ function M.resolve(name)
 
   local adapter = vim.deepcopy(value)
   adapter.name = name
-  adapter.capabilities = vim.tbl_deep_extend("force", M.default_capabilities(), adapter.capabilities or {})
+  local opts = adapter.opts or {}
+  adapter.capabilities = vim.tbl_deep_extend(
+    "force",
+    M.default_capabilities(),
+    { tools = opts.tools == true, vision = opts.vision == true },
+    adapter.capabilities or {}
+  )
   if adapter.type == "http" and adapter.connect == nil then
     adapter.connect = require("agent_sdk.http").connect
   end

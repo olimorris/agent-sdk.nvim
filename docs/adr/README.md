@@ -13,7 +13,8 @@ To add one, copy the next number and write a title and a short paragraph. Add "C
 - [0007](0007-a-prompt-is-not-done-while-a-tool-call-is-unanswered.md) - A prompt isn't done while a tool call is unanswered
 - [0008](0008-a-failed-prompt-adds-nothing-to-the-history.md) - A failed prompt adds nothing to the history
 - [0009](0009-streaming-and-non-streaming-share-handlers.md) - Streaming and non-streaming replies use the same handlers
-- [0010](0010-provider-reply-blocks-are-stored-as-received.md) - A provider's reply blocks are stored as received and sent back unchanged
+- [0010](0010-provider-reply-blocks-are-stored-as-received.md) - A provider's reply blocks are stored as received and sent back unchanged (superseded by 0014)
 - [0011](0011-no-file-handlers-or-terminals-for-acp-agents.md) - No file handlers or terminals for ACP agents
 - [0012](0012-adapters-start-from-codecompanion.md) - Adapters start from CodeCompanion's adapter code
 - [0013](0013-a-public-test-adapter.md) - The SDK ships a public test adapter
+- [0014](0014-transports-and-adapters-are-ports-of-codecompanion.md) - Transports and adapters are ports of CodeCompanion's code

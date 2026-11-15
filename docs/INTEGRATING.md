@@ -130,6 +130,7 @@ Events tell the plugin something and ask nothing of it.
 | `on.text` | `event.text`, a piece of the answer |
 | `on.reasoning` | `event.text`, a piece of the reasoning |
 | `on.usage` | Token counts |
+| `on.tool_update` | `update.id`, `update.status` (`completed`, `failed`), `update.output`. Sent when the plugin answers the call |
 | `on.done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
 | `on.error` | `event.message`, `event.cancelled`, `event.prompt` |
 

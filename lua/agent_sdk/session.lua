@@ -15,6 +15,7 @@ local M = {}
 ---@field text fun(event: table)?
 ---@field reasoning fun(event: table)?
 ---@field usage fun(event: table)?
+---@field tool_update fun(update: table)?
 ---@field done fun(reply: agent_sdk.Reply)?
 ---@field error fun(event: table)?
 ---@field request { tool_call: fun(call: table)?, permission: fun(request: table)? }?
@@ -241,11 +242,19 @@ local function end_round(session, turn, raw)
   if #round.reasoning > 0 then
     assistant.reasoning = { content = table.concat(round.reasoning) }
   end
-  if #round.tool_calls > 0 then
-    assistant.tools = { calls = vim.deepcopy(round.tool_calls) }
+  if raw.reasoning then
+    assistant.reasoning = raw.reasoning
   end
-  if raw.data ~= nil then
-    assistant.data = raw.data
+  if #round.tool_calls > 0 then
+    assistant.tools = {
+      calls = vim.tbl_map(function(call)
+        return {
+          id = call.id,
+          type = "function",
+          ["function"] = { name = call.name, arguments = vim.json.encode(call.arguments or vim.empty_dict()) },
+        }
+      end, round.tool_calls),
+    }
   end
   turn.messages[#turn.messages + 1] = assistant
 
@@ -256,13 +265,25 @@ local function end_round(session, turn, raw)
   send_tool_results(session, turn)
 end
 
+local function update_tool_call(turn, update)
+  for _, tool_call in ipairs(turn.tool_calls) do
+    if tool_call.id == update.id then
+      for field, value in pairs(update) do
+        if field ~= "type" then
+          tool_call[field] = value
+        end
+      end
+    end
+  end
+end
+
 local function tool_call_event(session, turn, raw)
   local tool_call = vim.tbl_extend("force", {}, raw)
   tool_call.type = nil
   local round = turn.round
   local index = #round.tool_calls + 1
   round.tool_calls[index] = tool_call
-  turn.tool_calls[#turn.tool_calls + 1] = tool_call
+  turn.tool_calls[#turn.tool_calls + 1] = vim.deepcopy(tool_call)
 
   if session.adapter.type ~= "http" then
     local function ignore() end
@@ -276,6 +297,10 @@ local function tool_call_event(session, turn, raw)
     end
     round.results[index] = { role = "tool", content = content, tools = { call_id = raw.id, is_error = is_error } }
     round.answered = round.answered + 1
+    local update =
+      { type = "tool_update", id = raw.id, status = is_error and "failed" or "completed", output = content }
+    update_tool_call(turn, update)
+    deliver(session, turn, update)
     send_tool_results(session, turn)
   end
 
@@ -347,6 +372,8 @@ local function process(session, turn, raw)
     round.usage = vim.tbl_extend("force", round.usage or {}, fields)
   elseif kind == "tool_call" then
     event = tool_call_event(session, turn, raw)
+  elseif kind == "tool_update" then
+    update_tool_call(turn, raw)
   end
 
   if turn.stream then

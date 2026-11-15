@@ -1,27 +1,42 @@
-local http = require("agent_sdk.http")
+local Client = require("agent_sdk.http").Client
 
 local M = {}
 
+local function read(path)
+  local file = io.open(path, "rb")
+  if not file then
+    return nil
+  end
+  local text = file:read("*a")
+  file:close()
+  return text
+end
+
+M.read = function(path)
+  return assert(read(path))
+end
+
+---Swap curl for a fake that records each request and lets the test answer it
 function M.install()
-  local original = http.run
+  local post = Client.static.methods.post
+  local original = post.default
   local fake = { calls = {} }
 
-  http.run = function(cmd, opts, on_exit)
-    local job = { killed = nil }
-    function job:kill(signal)
-      self.killed = signal
+  post.default = function(opts)
+    local job = {}
+    function job.shutdown()
+      job.killed = true
     end
 
-    local call = { cmd = cmd, opts = opts, on_exit = on_exit, job = job }
-    call.body_path = opts.stdin:match('data%-binary = "@([^"]*)"')
-    if call.body_path then
-      local file = io.open(call.body_path, "rb")
-      if file then
-        call.body_text = file:read("*a")
-        call.body = vim.json.decode(call.body_text)
-        file:close()
-      end
-    end
+    local headers_file = opts.raw[#opts.raw]:sub(2)
+    local call = {
+      opts = opts,
+      job = job,
+      body_path = opts.body_file,
+      body = vim.json.decode(read(opts.body_file)),
+      headers_text = read(headers_file),
+      headers_file = headers_file,
+    }
     fake.calls[#fake.calls + 1] = call
     if fake.on_call then
       vim.schedule(function()
@@ -32,24 +47,29 @@ function M.install()
   end
 
   function fake.restore()
-    http.run = original
+    post.default = original
   end
 
   return fake
 end
 
-function M.deliver(call, text, size, exit)
-  for index = 1, #text, size do
-    call.opts.stdout(nil, text:sub(index, index + size - 1))
+---Answer a call the way curl would: line by line when streaming, then the whole response
+---@param call table
+---@param text string
+---@param status? number
+function M.deliver(call, text, status)
+  if call.opts.stream then
+    for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+      call.opts.stream(line)
+    end
   end
-  call.on_exit(exit or { code = 0, stdout = text, stderr = "" })
+  call.opts.callback({ status = status or 200, headers = {}, body = text, exit = 0 })
 end
 
-function M.read(path)
-  local file = assert(io.open(path, "rb"))
-  local text = file:read("*a")
-  file:close()
-  return text
+---@param call table
+---@param stderr string
+function M.fail(call, stderr)
+  call.opts.on_error({ message = stderr, stderr = stderr, exit = 7 })
 end
 
 return M

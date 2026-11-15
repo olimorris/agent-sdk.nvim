@@ -63,7 +63,7 @@ Every adapter is used through a session and `session:prompt()`.
 - The plugin sends prompts and tool results. The SDK adds the assistant's reply to the history when the request is done
 - Plugins read `session.messages` and change it only with `session:set_messages(...)`
 - History is stored in CodeCompanion's provider-neutral message format and converted per adapter on every request
-- Reasoning blocks (Anthropic signatures, OpenAI encrypted reasoning) are stored exactly as received and sent back unchanged
+- Reasoning is stored as CodeCompanion stores it, with provider data such as Anthropic's signature in `reasoning._data`, and adapters rebuild the provider's blocks from it
 - Tool call ids must pair up within each request, as some adapters re-mint ids for historical tool calls
 
 ### ACP
@@ -86,6 +86,7 @@ Events tell the plugin something, and ask nothing of it:
 - `on.text`
 - `on.reasoning`
 - `on.usage`
+- `on.tool_update`
 - `on.done`
 - `on.error`
 
@@ -123,8 +124,8 @@ Tool calls are passed straight through to the plugin's `on.request.tool_call` ha
 
 ## Adapters
 
-- Keep CodeCompanion's adapter structure (schema, handlers, `env`)
-- Rename handlers and group them into sections (reasoning, tool calling, and so on). Work this out while building
+- Port CodeCompanion's clients and adapters, keeping its structure and names, and drop what the SDK doesn't need ([0014](adr/0014-transports-and-adapters-are-ports-of-codecompanion.md))
+- HTTP adapters use CodeCompanion's nested handlers (`lifecycle`, `request`, `response`, `tools`) and its `schema`
 - An adapter is included only if it needs code beyond config
 - OpenRouter is the one exception and ships as its own adapter because of its scale. It extends `openai_compatible`
 - `openai_compatible` is the base for everything else. Providers like Novita are config examples in the docs, not adapters
@@ -161,6 +162,5 @@ Ideas only. Not designed yet.
 
 Built: the adapter registry, sessions, events, requests, the test adapter, the HTTP transport and the Anthropic adapter. A demo plugin lives in [agent-sdk-demo.nvim](../../agent-sdk-demo.nvim).
 
-1. Try the SDK from the demo plugin against Anthropic, and change what feels wrong
-2. Build the Claude Code preset and the ACP transport
-3. Build bottleneck.nvim on it. Rewrite the README's examples from that experience, as the current ones are a sketch
+1. Build the Claude Code preset and the ACP transport
+2. Build bottleneck.nvim on it. Rewrite the README's examples from that experience, as the current ones are a sketch

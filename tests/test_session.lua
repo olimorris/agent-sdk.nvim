@@ -369,6 +369,30 @@ local function answering(log)
   }
 end
 
+T["answering a tool call sends a tool update on http"] = function()
+  local _, session = make({ replies = { { read_file_call("a"), read_file_call("b"), DONE }, { text("ok"), DONE } } })
+  local updates = {}
+  session
+    :prompt("go", {
+      on = {
+        tool_update = function(update)
+          updates[#updates + 1] = { update.id, update.status, update.output }
+        end,
+        request = {
+          tool_call = function(call)
+            if call.id == "a" then
+              call.respond("fine")
+            else
+              call.fail("no such file")
+            end
+          end,
+        },
+      },
+    })
+    :wait(1000)
+  eq(updates, { { "a", "completed", "fine" }, { "b", "failed", "no such file" } })
+end
+
 T["a tool call is answered and the same prompt carries on to one done"] = function()
   local scripted, session = make({
     replies = {
@@ -380,7 +404,15 @@ T["a tool call is answered and the same prompt carries on to one done"] = functi
   local reply = session:prompt("why?", { on = answering(log) }):wait(1000)
 
   eq(log, { "text:Reading. ", "tool_call:a", "text:It moved.", "done:Reading. It moved." })
-  eq(reply.tool_calls, { { id = "a", name = "read_file", arguments = { path = "a.lua" } } })
+  eq(reply.tool_calls, {
+    {
+      id = "a",
+      name = "read_file",
+      arguments = { path = "a.lua" },
+      status = "completed",
+      output = "contents of a.lua",
+    },
+  })
   eq(#scripted.requests, 2)
   eq(session.messages, {
     { role = "user", content = "why?" },
@@ -388,7 +420,11 @@ T["a tool call is answered and the same prompt carries on to one done"] = functi
       role = "llm",
       content = "Reading. ",
       reasoning = { content = "r" },
-      tools = { calls = { { id = "a", name = "read_file", arguments = { path = "a.lua" } } } },
+      tools = {
+        calls = {
+          { id = "a", type = "function", ["function"] = { name = "read_file", arguments = '{"path":"a.lua"}' } },
+        },
+      },
     },
     { role = "tool", content = "contents of a.lua", tools = { call_id = "a" } },
     { role = "llm", content = "It moved." },
@@ -929,15 +965,14 @@ T["the effective model is the session's or the adapter's"] = function()
   eq(scripted.requests[1].model, "override")
 end
 
-T["done data is stored on the assistant message and not shown to handlers"] = function()
+T["reasoning formed by the adapter is what the history keeps"] = function()
+  local formed = { content = "r", _data = { signature = "sig" } }
   local _, session =
-    make({ replies = { { text("hi"), { type = "done", data = { provider = "x", content = { 1 } } } } } })
-  local log, on = recorder(ALL)
-  local reply = session:prompt("q", { on = on }):wait(1000)
+    make({ replies = { { { type = "reasoning", text = "r" }, text("hi"), { type = "done", reasoning = formed } } } })
+  local reply = session:prompt("q"):wait(1000)
 
-  eq(session.messages[2], { role = "llm", content = "hi", data = { provider = "x", content = { 1 } } })
-  eq(reply.data, nil)
-  eq(log[#log][2].data, nil)
+  eq(session.messages[2], { role = "llm", content = "hi", reasoning = formed })
+  eq(reply.reasoning, "r")
 end
 
 return T
