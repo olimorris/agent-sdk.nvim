@@ -488,24 +488,22 @@ local function to_tool_call(tool_call)
     status = tool_call.status,
     content = tool_call.content,
     locations = tool_call.locations,
-    rawInput = tool_call.rawInput,
-    rawOutput = tool_call.rawOutput,
+    arguments = tool_call.rawInput,
+    output = tool_call.rawOutput,
     meta = tool_call._meta,
   }
 end
 
----ACP's Usage fields, with the input and output counts under the names HTTP adapters use too
 ---@param usage table
 ---@return table
 local function to_usage(usage)
-  local event = vim.tbl_extend("force", usage, {
+  return {
     type = "usage",
     input_tokens = usage.inputTokens,
     output_tokens = usage.outputTokens,
-    meta = usage._meta,
-  })
-  event.inputTokens, event.outputTokens, event._meta = nil, nil, nil
-  return event
+    cache_read_input_tokens = usage.cachedReadTokens,
+    cache_creation_input_tokens = usage.cachedWriteTokens,
+  }
 end
 
 ---@param adapter agent_sdk.ACPAdapter

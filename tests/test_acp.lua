@@ -87,7 +87,7 @@ T["streams text and reasoning, then done with usage"] = function()
   eq(reply.usage, { input_tokens = 10, output_tokens = 4 })
 end
 
-T["usage keeps ACP's names for counts beyond input and output"] = function()
+T["usage uses the same field names as HTTP adapters"] = function()
   agent.on_prompt = function(message)
     finish(message, {
       stopReason = "end_turn",
@@ -95,7 +95,12 @@ T["usage keeps ACP's names for counts beyond input and output"] = function()
     })
   end
   local reply = make():prompt("hi"):wait(1000)
-  eq(reply.usage, { input_tokens = 10, output_tokens = 4, cachedReadTokens = 900, cachedWriteTokens = 20 })
+  eq(reply.usage, {
+    input_tokens = 10,
+    output_tokens = 4,
+    cache_read_input_tokens = 900,
+    cache_creation_input_tokens = 20,
+  })
 end
 
 T["the prompt is sent as content blocks to the agent's session"] = function()
@@ -197,8 +202,7 @@ T["tool calls carry the spec's fields and needs_result false"] = function()
 
   eq({ seen.id, seen.title, seen.kind, seen.needs_result }, { "t1", "Read lua/init.lua", "read", false })
   eq(seen.name, nil)
-  eq(seen.rawInput, { path = "lua/init.lua" })
-  eq(seen.arguments, nil)
+  eq(seen.arguments, { path = "lua/init.lua" })
   eq(seen.meta, { claudeCode = { toolName = "Read" } })
   eq(#reply.tool_calls, 1)
 end
@@ -449,7 +453,7 @@ T["tool updates reach the plugin and fill in the reply's tool call"] = function(
 
   eq(#updates, 1)
   eq({ updates[1].id, updates[1].status }, { "t1", "completed" })
-  eq(updates[1].rawOutput, { exit = 0 })
+  eq(updates[1].output, { exit = 0 })
   eq(updates[1].meta, { claudeCode = { toolName = "Bash" } })
   eq({ reply.tool_calls[1].title, reply.tool_calls[1].status }, { "Run tests", "completed" })
 end
