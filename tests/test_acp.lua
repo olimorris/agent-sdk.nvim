@@ -87,6 +87,17 @@ T["streams text and reasoning, then done with usage"] = function()
   eq(reply.usage, { input_tokens = 10, output_tokens = 4 })
 end
 
+T["usage keeps ACP's names for counts beyond input and output"] = function()
+  agent.on_prompt = function(message)
+    finish(message, {
+      stopReason = "end_turn",
+      usage = { inputTokens = 10, outputTokens = 4, cachedReadTokens = 900, cachedWriteTokens = 20 },
+    })
+  end
+  local reply = make():prompt("hi"):wait(1000)
+  eq(reply.usage, { input_tokens = 10, output_tokens = 4, cachedReadTokens = 900, cachedWriteTokens = 20 })
+end
+
 T["the prompt is sent as content blocks to the agent's session"] = function()
   agent.on_prompt = finish
   make():prompt("hi"):wait(1000)
@@ -186,7 +197,8 @@ T["tool calls carry the spec's fields and needs_result false"] = function()
 
   eq({ seen.id, seen.title, seen.kind, seen.needs_result }, { "t1", "Read lua/init.lua", "read", false })
   eq(seen.name, nil)
-  eq(seen.arguments, { path = "lua/init.lua" })
+  eq(seen.rawInput, { path = "lua/init.lua" })
+  eq(seen.arguments, nil)
   eq(seen.meta, { claudeCode = { toolName = "Read" } })
   eq(#reply.tool_calls, 1)
 end
@@ -294,17 +306,95 @@ T["the agent exiting ends the prompt with its last words"] = function()
   eq(err.message, "the agent exited with code 1: not logged in")
 end
 
-T["the next prompt starts a new agent after the last one exited"] = function()
+T["once the agent has exited, every later prompt in the session ends in an error"] = function()
   agent.on_prompt = function()
-    agent.exit(1)
+    agent.exit(1, "crashed\n")
   end
   local session = make()
   session:prompt("one"):wait(1000)
 
   agent.on_prompt = finish
+  local _, err = session:prompt("two"):wait(1000)
+  eq(err.message, "agent-sdk.nvim: the agent exited with code 1: crashed")
+  eq(#agent.spawns, 1)
+end
+
+T["an agent that exits before its session starts is started again on the next prompt"] = function()
+  agent.silent.initialize = true
+  local session = make()
+  local task = session:prompt("one")
+  vim.wait(50, function()
+    return #agent.methods("initialize") == 1
+  end)
+  agent.exit(1)
+  task:pwait(1000)
+
+  agent.silent.initialize = nil
+  agent.on_prompt = finish
   local reply = session:prompt("two"):wait(1000)
   eq(#agent.spawns, 2)
   eq(reply ~= nil, true)
+end
+
+T["a stopped turn's late updates don't reach the next prompt, which waits for the turn to end"] = function()
+  local first
+  agent.on_prompt = function(message)
+    first = message
+    agent.update(chunk("old"))
+  end
+
+  local session
+  local task
+  session = make({
+    on = {
+      text = function()
+        task:close()
+      end,
+    },
+  })
+  task = session:prompt("one")
+  task:pwait(1000)
+
+  session.on.text = nil
+  agent.on_prompt = function(message)
+    agent.update(chunk("new"))
+    finish(message)
+  end
+  local second = session:prompt("two")
+  vim.wait(50)
+  eq(#agent.methods("session/prompt"), 1)
+
+  agent.update(chunk("late"))
+  finish(first, { stopReason = "cancelled" })
+  local reply = second:wait(1000)
+  eq(reply.text, "new")
+end
+
+T["a request the editor doesn't handle is answered with method not found"] = function()
+  agent.on_prompt = function(message)
+    agent.send({ id = 7, method = "fs/read_text_file", params = { sessionId = "s1", path = "/etc/hosts" } })
+    finish(message)
+  end
+  make():prompt("hi"):wait(1000)
+
+  local answer = vim.tbl_filter(function(message)
+    return message.id == 7
+  end, agent.sent)[1]
+  eq(answer.error.code, -32601)
+end
+
+T["a prompt the agent answers without a stop reason ends in an error"] = function()
+  agent.on_prompt = function(message)
+    agent.send({ id = message.id, result = vim.NIL })
+  end
+  local _, err = make():prompt("hi"):wait(1000)
+  eq(err.message, "the agent ended its turn without a stop reason")
+end
+
+T["an agent that never answers session/new ends the prompt in an error"] = function()
+  agent.silent["session/new"] = true
+  local _, err = make(nil, claude_code({ defaults = { timeout = 50 } })):prompt("hi"):wait(1000)
+  eq(err.message, "agent-sdk.nvim: the agent couldn't start a session: session/new timed out")
 end
 
 T["an agent that can't be started ends the prompt in an error"] = function()
@@ -359,7 +449,7 @@ T["tool updates reach the plugin and fill in the reply's tool call"] = function(
 
   eq(#updates, 1)
   eq({ updates[1].id, updates[1].status }, { "t1", "completed" })
-  eq(updates[1].output, { exit = 0 })
+  eq(updates[1].rawOutput, { exit = 0 })
   eq(updates[1].meta, { claudeCode = { toolName = "Bash" } })
   eq({ reply.tool_calls[1].title, reply.tool_calls[1].status }, { "Run tests", "completed" })
 end

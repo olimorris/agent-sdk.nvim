@@ -25,6 +25,7 @@ function M.install()
     spawns = {},
     sent = {},
     system_prompt = true,
+    silent = {},
     config_options = { MODEL_OPTION, MODE_OPTION },
   }
 
@@ -64,7 +65,9 @@ function M.install()
   local function handle(message)
     agent.sent[#agent.sent + 1] = message
     local method = message.method
-    if method == "initialize" then
+    if agent.silent[method] then
+      return
+    elseif method == "initialize" then
       agent.send({
         id = message.id,
         result = {

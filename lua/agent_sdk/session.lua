@@ -251,7 +251,10 @@ local function end_round(session, turn, raw)
         return {
           id = call.id,
           type = "function",
-          ["function"] = { name = call.name, arguments = vim.json.encode(call.arguments or vim.empty_dict()) },
+          ["function"] = {
+            name = call.name,
+            arguments = vim.json.encode(call.arguments or call.rawInput or vim.empty_dict()),
+          },
         }
       end, round.tool_calls),
     }

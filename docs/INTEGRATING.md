@@ -129,8 +129,8 @@ Events tell the plugin something and ask nothing of it.
 | --- | --- |
 | `on.text` | `event.text`, a piece of the answer |
 | `on.reasoning` | `event.text`, a piece of the reasoning |
-| `on.usage` | Token counts |
-| `on.tool_update` | `update.id`, `update.status` (`pending`, `in_progress`, `completed`, `failed`), `update.output`. On ACP, also `title`, `kind`, `content`, `locations`, `arguments` and `meta`. On HTTP, sent when the plugin answers the call |
+| `on.usage` | Token counts: `input_tokens`, `output_tokens`, and any other counts the provider sends under its own names (on ACP, `cachedReadTokens`, `cachedWriteTokens`, `thoughtTokens`) |
+| `on.tool_update` | `update.id`, `update.status` (`pending`, `in_progress`, `completed`, `failed`), `update.output`. On ACP, `update.rawOutput` instead of `output`, plus `title`, `kind`, `content`, `locations`, `rawInput` and `meta`. On HTTP, sent when the plugin answers the call |
 | `on.done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
 | `on.error` | `event.message`, `event.cancelled`, `event.prompt` |
 
@@ -140,7 +140,7 @@ Requests ask the plugin for something. The reply waits until the handler answers
 
 | Handler | Payload |
 | --- | --- |
-| `on.request.tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.name` is `nil` as ACP has no tool names: use `call.title`, `call.kind`, `call.status`, and `call.meta` for the agent's own extras |
+| `on.request.tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.name` is `nil` as ACP has no tool names and `call.rawInput` replaces `call.arguments`: use `call.title`, `call.kind`, `call.status`, and `call.meta` for the agent's own extras |
 | `on.request.permission` | `request.tool_call`, `request.options` (each with `id`, `name`, `kind`), `request.respond(option_id)` |
 
 ```lua
@@ -167,7 +167,7 @@ on = {
 - A prompt that ends in `error` adds nothing to the history, not even the prompt itself. `event.prompt` holds what was passed to `session:prompt()`, so the plugin can send it again or return it to the user
 - Calling `session:prompt()` or `session:ask()` while a reply is in progress raises an error
 - An `on.request.permission` handler must call `request.respond()`. The agent waits until it does. `request.respond(nil)` cancels
-- Without an `on.request.permission` handler, the SDK rejects every request
+- Without an `on.request.permission` handler, the SDK picks the agent's reject option, or cancels the request when the agent offers none
 - An `on.request.tool_call` handler must call `call.respond()` or `call.fail()` when `call.needs_result` is `true`. The prompt carries on once every call is answered, and ends in one `done`. Without one, the SDK fails every call
 - The SDK closes every open session on `VimLeavePre`
 
@@ -180,6 +180,7 @@ The plugin's code is the same for both, except:
 - On ACP, tool calls have `needs_result = false`: the agent runs the tool itself, and `call.respond()` and `call.fail()` do nothing. On HTTP, `needs_result` is `true` and the plugin owes a result. The API for giving the model the plugin's tool definitions isn't designed yet, so stop and ask the user if the plugin needs tools
 - An ACP agent reads files, writes files and runs commands itself, behind permission requests. It can't do any of these through Neovim, so it doesn't see unsaved changes
 - The SDK starts an ACP agent's process on the first prompt, so the first reply is slower
+- If an ACP agent's process exits, the agent's history goes with it. The prompt in progress ends in an `error`, and so does every later prompt in that session. Start a new session to carry on
 
 ### Test adapter
 

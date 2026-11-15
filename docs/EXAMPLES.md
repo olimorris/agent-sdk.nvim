@@ -1,6 +1,6 @@
 # Examples
 
-How the SDK looks from a plugin. The first four sections are built and tested. [Still to decide](#still-to-decide) holds what isn't.
+How the SDK looks from a plugin. The first five sections are built and tested, and [Still to decide](#still-to-decide) holds what isn't. For the user's side, see [CONFIGURATION.md](CONFIGURATION.md).
 
 `append` and `read_file` are the plugin's own functions: one writes to a buffer, the other returns a file's text, including unsaved changes.
 
@@ -35,12 +35,18 @@ session:prompt("Why was the nil check moved?", { stream = false })
 
 ```lua
 reply = {
-  text = "I'll read the file to check. It moved because...",
+  text = "I'll read the file to check.It moved because...",
   reasoning = "The nil check moved above the loop, so...",
   tool_calls = {
-    { id = "toolu_01A", name = "read_file", arguments = { path = "lua/foo.lua" } },
+    {
+      id = "toolu_01A",
+      name = "read_file",
+      arguments = { path = "lua/foo.lua" },
+      status = "completed",
+      output = "local M = {}\n...",
+    },
   },
-  usage = { input_tokens = 2600, output_tokens = 140 },
+  usage = { input_tokens = 2600, output_tokens = 125 },
 }
 ```
 
@@ -66,11 +72,11 @@ on = {
 }
 ```
 
-The plugin's handlers run in this order: `text`, `request.tool_call`, `text`, `done`.
+The plugin's handlers run in this order: `text`, `request.tool_call`, `tool_update`, `text`, `done`. The SDK sends `tool_update` once the plugin answers, with `status` set to `completed` or `failed`.
 
 A tool call sits under `on.request` because the model is asking the plugin for something. `text`, `reasoning`, `done` and `error` ask nothing.
 
-Afterwards the history holds every step, with each tool call paired to its result:
+Afterwards the history holds every step, with each tool call paired to its result. It uses CodeCompanion's message format, so tool calls are stored as OpenAI-style `function` calls:
 
 ```lua
 session.messages = {
@@ -78,8 +84,16 @@ session.messages = {
   {
     role = "llm",
     content = "I'll read the file to check.",
-    reasoning = { content = "The nil check moved above the loop, so..." },
-    tools = { calls = { { id = "toolu_01A", name = "read_file", arguments = { path = "lua/foo.lua" } } } },
+    reasoning = { content = "The nil check moved above the loop, so...", _data = { signature = "EqQBCkYIBxgC..." } },
+    tools = {
+      calls = {
+        {
+          id = "toolu_01A",
+          type = "function",
+          ["function"] = { name = "read_file", arguments = '{"path":"lua/foo.lua"}' },
+        },
+      },
+    },
   },
   { role = "tool", content = "local M = {}\n...", tools = { call_id = "toolu_01A" } },
   { role = "llm", content = "It moved because..." },
@@ -117,11 +131,11 @@ In order, with the table each handler is called with:
 
 ```lua
 -- first request
-on.usage({ type = "usage", input_tokens = 1200, output_tokens = 1 })
 on.reasoning({ type = "reasoning", text = "The nil check moved " })
 on.reasoning({ type = "reasoning", text = "above the loop, so..." })
 on.text({ type = "text", text = "I'll read the file " })
 on.text({ type = "text", text = "to check." })
+on.usage({ type = "usage", input_tokens = 1200, output_tokens = 85 })
 on.request.tool_call({
   type = "tool_call",
   id = "toolu_01A",
@@ -131,18 +145,20 @@ on.request.tool_call({
   respond = function(content) end,
   fail = function(message) end,
 })
-on.usage({ type = "usage", output_tokens = 85 })
 
--- the plugin calls call.respond("local M = {}\n..."), and the SDK sends the second request
-on.usage({ type = "usage", input_tokens = 1400, output_tokens = 1 })
+-- the plugin calls call.respond("local M = {}\n...")
+on.tool_update({ type = "tool_update", id = "toolu_01A", status = "completed", output = "local M = {}\n..." })
+
+-- the SDK sends the second request
 on.text({ type = "text", text = "It moved because..." })
-on.usage({ type = "usage", output_tokens = 40 })
+on.usage({ type = "usage", input_tokens = 1400, output_tokens = 40 })
 
 on.done(reply)
 ```
 
 - `reasoning` and `text` arrive in pieces as they stream. With `stream = false` they arrive once each, with the whole text
-- `usage` reports the counts as the provider sends them, so a request can report more than once
+- `usage` arrives once per request, when the provider reports the final counts
+- Tool calls arrive once the request has finished, as their arguments stream in pieces
 - A handler the plugin didn't define is skipped
 
 ### What `done` receives
@@ -154,41 +170,128 @@ reply = {
   text = "I'll read the file to check.It moved because...",
   reasoning = "The nil check moved above the loop, so...",
   tool_calls = {
-    { id = "toolu_01A", name = "read_file", arguments = { path = "lua/foo.lua" } },
+    {
+      id = "toolu_01A",
+      name = "read_file",
+      arguments = { path = "lua/foo.lua" },
+      status = "completed",
+      output = "local M = {}\n...",
+    },
   },
   usage = { input_tokens = 2600, output_tokens = 125 },
 }
 ```
 
 - `text` and `reasoning` join every piece exactly as received, with nothing added between requests
+- `tool_calls` carry the latest `status` and `output` from `tool_update`
 - `usage` adds up every request the prompt made
 
 ### What the history holds
 
+The same as in [A tool call](#a-tool-call). Anthropic's thinking signature is kept in `reasoning._data`, and the adapter sends it back on the next request. Plugins don't read `_data`.
+
+## An agent's reply
+
+The same prompt flow on Claude Code. The agent thinks, asks to run a command, runs it once the plugin allows it, and answers. The plugin's code is the one from [A reply](#a-reply), plus a permission policy.
+
 ```lua
-session.messages = {
-  { role = "user", content = "Why was the nil check moved?" },
-  {
-    role = "llm",
-    content = "I'll read the file to check.",
-    reasoning = { content = "The nil check moved above the loop, so..." },
-    tools = { calls = { { id = "toolu_01A", name = "read_file", arguments = { path = "lua/foo.lua" } } } },
-    data = {
-      provider = "anthropic",
-      content = {
-        { type = "thinking", thinking = "The nil check moved above the loop, so...", signature = "EqQBCkYIBxgC..." },
-        { type = "text", text = "I'll read the file to check." },
-        { type = "tool_use", id = "toolu_01A", name = "read_file", input = { path = "lua/foo.lua" } },
-      },
-    },
+on = {
+  request = {
+    permission = function(request)
+      local allowed = request.tool_call.kind == "read" or request.tool_call.kind == "search"
+      for _, option in ipairs(request.options) do
+        if option.kind == (allowed and "allow_once" or "reject_once") then
+          return request.respond(option.id)
+        end
+      end
+      request.respond(nil)
+    end,
   },
-  { role = "tool", content = "local M = {}\n...", tools = { call_id = "toolu_01A" } },
-  { role = "llm", content = "It moved because...", data = { provider = "anthropic", content = { ... } } },
+  tool_update = function(update)
+    set_status(update.id, update.status)
+  end,
 }
 ```
 
-- `content`, `reasoning` and `tools` are the same for every adapter
-- `data` is the adapter's own copy of the reply, sent back unchanged on the next request so Anthropic's thinking signature survives. Plugins don't read it
+`set_status` is the plugin's own function, showing a tool's progress.
+
+### What your handlers receive
+
+```lua
+on.reasoning({ type = "reasoning", text = "I should run the tests." })
+on.request.tool_call({
+  type = "tool_call",
+  id = "toolu_02B",
+  title = "make test",
+  kind = "execute",
+  status = "pending",
+  arguments = { command = "make test" },
+  meta = { claudeCode = { toolName = "Bash" } },
+  needs_result = false,
+})
+on.request.permission({
+  type = "permission_request",
+  tool_call = { id = "toolu_02B", title = "make test", kind = "execute" },
+  options = {
+    { id = "allow", name = "Allow", kind = "allow_once" },
+    { id = "reject", name = "Reject", kind = "reject_once" },
+  },
+  respond = function(option_id) end,
+})
+
+-- the plugin calls request.respond("allow"), and the agent runs the command
+on.tool_update({ type = "tool_update", id = "toolu_02B", status = "completed", output = { output = "117 passed" } })
+on.text({ type = "text", text = "All 117 tests pass." })
+on.usage({ type = "usage", input_tokens = 1800, output_tokens = 60, cache_read_input_tokens = 9000 })
+
+on.done(reply)
+```
+
+- A tool call has no `name`, as ACP has none. `title` and `kind` describe it, and `meta` holds the agent's own extras
+- `needs_result` is `false`, as the agent runs its own tools
+- `tool_update` carries only the fields the agent sent. `output` is whatever the agent reports, so its shape varies by tool
+- `usage` arrives once, when the agent finishes
+
+### What `done` receives
+
+```lua
+reply = {
+  text = "All 117 tests pass.",
+  reasoning = "I should run the tests.",
+  tool_calls = {
+    {
+      id = "toolu_02B",
+      title = "make test",
+      kind = "execute",
+      status = "completed",
+      arguments = { command = "make test" },
+      output = { output = "117 passed" },
+      meta = { claudeCode = { toolName = "Bash" } },
+    },
+  },
+  usage = { input_tokens = 1800, output_tokens = 60, cache_read_input_tokens = 9000 },
+}
+```
+
+### What the history holds
+
+The agent keeps its own history, so `session.messages` is only a record of what the SDK saw. It's never sent back.
+
+```lua
+session.messages = {
+  { role = "user", content = "Do the tests pass?" },
+  {
+    role = "llm",
+    content = "All 117 tests pass.",
+    reasoning = { content = "I should run the tests." },
+    tools = {
+      calls = {
+        { id = "toolu_02B", type = "function", ["function"] = { arguments = '{"command":"make test"}' } },
+      },
+    },
+  },
+}
+```
 
 ## A prompt that fails
 

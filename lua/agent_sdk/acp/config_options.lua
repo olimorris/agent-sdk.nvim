@@ -1,5 +1,5 @@
 --=============================================================================
--- Session config options - Ported from CodeCompanion's codecompanion/acp/defaults.lua
+-- Session config options - Adapted from CodeCompanion's codecompanion/interactions/chat/acp/defaults.lua
 --=============================================================================
 local M = {}
 

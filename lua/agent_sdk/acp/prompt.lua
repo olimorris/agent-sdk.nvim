@@ -1,5 +1,5 @@
 --=============================================================================
--- Prompt - Ported from CodeCompanion's codecompanion/acp/prompt_builder.lua
+-- Prompt - Adapted from CodeCompanion's codecompanion/acp/prompt_builder.lua
 --=============================================================================
 local METHODS = require("agent_sdk.acp.methods")
 local acp_adapter = require("agent_sdk.adapters.acp")
@@ -47,8 +47,12 @@ function Prompt:send()
     sessionId = self.connection.session_id,
     prompt = self.messages,
   }, function(result, err)
+    self.connection:release(self)
     if err then
       return self:fail(err)
+    end
+    if type(result) ~= "table" or type(result.stopReason) ~= "string" then
+      return self:fail("the agent ended its turn without a stop reason")
     end
     self:complete(result.stopReason, result.usage)
   end)
@@ -61,7 +65,6 @@ function Prompt:_finish()
     return false
   end
   self._finished = true
-  self.connection:release(self)
   return true
 end
 
@@ -75,6 +78,9 @@ end
 
 ---@param update table
 function Prompt:on_update(update)
+  if self._finished then
+    return
+  end
   local kind = update.sessionUpdate
   local content = update.content
   local text = type(content) == "table" and content.type == "text" and content.text or nil
@@ -105,7 +111,7 @@ function Prompt:on_permission(id, params)
   end
   self._permissions[id] = respond
 
-  if not self.handlers.permission then
+  if self._finished or not self.handlers.permission then
     return respond(nil)
   end
   self.handlers.permission({ tool_call = params.toolCall, options = params.options or {}, respond = respond })
@@ -126,6 +132,7 @@ function Prompt:complete(stop_reason, usage)
   end
 end
 
+---The turn stays active until the agent answers `session/prompt`, so its late updates are dropped rather than reaching the next prompt
 function Prompt:cancel()
   if not self:_finish() then
     return

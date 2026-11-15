@@ -1,5 +1,5 @@
 --=============================================================================
--- ACP Connection - Ported from CodeCompanion's codecompanion/acp/init.lua
+-- ACP Connection - Adapted from CodeCompanion's codecompanion/acp/init.lua
 --=============================================================================
 local METHODS = require("agent_sdk.acp.methods")
 local Prompt = require("agent_sdk.acp.prompt")
@@ -21,6 +21,8 @@ local options = require("agent_sdk.acp.config_options")
 ---@field _stdout string
 ---@field _stderr string[]
 ---@field _waiting fun(ok: boolean, err: string|nil)[]|nil
+---@field _idle fun()[] Prompts waiting for a cancelled turn to end
+---@field _exited string|nil Why the agent's process exited after its session started
 local Connection = {}
 Connection.__index = Connection
 
@@ -37,6 +39,7 @@ function Connection.new(args)
     system_prompt = args.system_prompt,
     _next_id = 1,
     _pending = {},
+    _idle = {},
     _stderr = {},
     _stdout = "",
   }, Connection)
@@ -153,6 +156,13 @@ function Connection:dispatch(line)
     local handler = DISPATCH[message.method]
     if handler and type(message.params) == "table" then
       handler(self, message)
+    elseif message.id ~= nil then
+      -- An unanswered request leaves the agent waiting forever
+      self:write({
+        id = message.id,
+        error = handler and { code = -32602, message = "Invalid params" }
+          or { code = -32601, message = "Method not found: " .. tostring(message.method) },
+      })
     end
   elseif message.id and self._pending[message.id] then
     local callback = self._pending[message.id]
@@ -235,6 +245,7 @@ function Connection:reset(message)
   if prompt then
     prompt:fail(message)
   end
+  self:_wake()
 end
 
 ---@param process table
@@ -247,7 +258,12 @@ function Connection:on_exit(process, code)
   acp_adapter.call_handler(self.resolved, "on_exit", { code = code })
 
   local last = vim.trim(table.concat(self._stderr)):match("([^\n]*)$")
-  self:reset(("the agent exited with code %s%s"):format(tostring(code), last ~= "" and (": " .. last) or ""))
+  local message = ("the agent exited with code %s%s"):format(tostring(code), last ~= "" and (": " .. last) or "")
+  -- A new process would start with none of the agent's history, so the plugin must start a new session
+  if self.session_id then
+    self._exited = message
+  end
+  self:reset(message)
 end
 
 function Connection:close()
@@ -267,6 +283,9 @@ end
 function Connection:open()
   if self.session_id then
     return true
+  end
+  if self._exited then
+    return false, self._exited
   end
   if self._waiting then
     return vim.async.await(function(callback)
@@ -294,6 +313,11 @@ function Connection:open()
   return success, err
 end
 
+---@return number milliseconds
+function Connection:_timeout()
+  return self.resolved.defaults.timeout or 20000
+end
+
 ---@return boolean success, string|nil err
 function Connection:_handshake()
   local ok, err = self:spawn()
@@ -302,7 +326,7 @@ function Connection:_handshake()
   end
 
   local info
-  info, err = self:request(METHODS.INITIALIZE, self.resolved.parameters)
+  info, err = self:request(METHODS.INITIALIZE, self.resolved.parameters, self:_timeout())
   if type(info) ~= "table" then
     return false, "the agent couldn't start: " .. (err or "no reply to initialize")
   end
@@ -318,7 +342,7 @@ function Connection:_handshake()
     cwd = vim.fn.getcwd(),
     mcpServers = self.resolved.defaults.mcpServers or {},
     systemPrompt = self:_system_prompt(),
-  })
+  }, self:_timeout())
   if type(session) ~= "table" or not session.sessionId then
     return false, "the agent couldn't start a session: " .. (err or "no session id")
   end
@@ -344,7 +368,7 @@ function Connection:_authenticate()
     return false, ("the agent doesn't offer the auth method %s, only %s"):format(method_id, table.concat(ids, ", "))
   end
 
-  local _, err = self:request(METHODS.AUTHENTICATE, { methodId = method_id })
+  local _, err = self:request(METHODS.AUTHENTICATE, { methodId = method_id }, self:_timeout())
   if err then
     return false, ("the agent couldn't sign in with %s: %s"):format(method_id, err)
   end
@@ -396,7 +420,7 @@ function Connection:set_option(config_id, value)
   local result, err = self:request(
     METHODS.SESSION_SET_CONFIG_OPTION,
     { sessionId = self.session_id, configId = config_id, value = value },
-    self.resolved.defaults.timeout or 20000
+    self:_timeout()
   )
   if err then
     return false, ("the agent couldn't set %s to %s: %s"):format(config_id, value, err)
@@ -420,10 +444,32 @@ function Connection:prompt(messages, handlers)
   return Prompt.new(self, messages, handlers)
 end
 
+function Connection:_wake()
+  local idle = self._idle
+  self._idle = {}
+  for _, callback in ipairs(idle) do
+    vim.schedule(callback)
+  end
+end
+
 ---@param prompt agent_sdk.ACP.Prompt
 function Connection:release(prompt)
   if self.active_prompt == prompt then
     self.active_prompt = nil
+    self:_wake()
+  end
+end
+
+---Wait for a cancelled turn to end, giving up on an agent that never answers it
+function Connection:wait_idle()
+  while self.active_prompt do
+    local prompt = self.active_prompt
+    vim.defer_fn(function()
+      self:release(prompt)
+    end, self:_timeout())
+    vim.async.await(function(callback)
+      table.insert(self._idle, callback)
+    end)
   end
 end
 
@@ -442,22 +488,24 @@ local function to_tool_call(tool_call)
     status = tool_call.status,
     content = tool_call.content,
     locations = tool_call.locations,
-    arguments = tool_call.rawInput,
-    output = tool_call.rawOutput,
+    rawInput = tool_call.rawInput,
+    rawOutput = tool_call.rawOutput,
     meta = tool_call._meta,
   }
 end
 
+---ACP's Usage fields, with the input and output counts under the names HTTP adapters use too
 ---@param usage table
 ---@return table
 local function to_usage(usage)
-  return {
+  local event = vim.tbl_extend("force", usage, {
     type = "usage",
     input_tokens = usage.inputTokens,
     output_tokens = usage.outputTokens,
-    cache_read_input_tokens = usage.cachedReadTokens,
-    cache_creation_input_tokens = usage.cachedWriteTokens,
-  }
+    meta = usage._meta,
+  })
+  event.inputTokens, event.outputTokens, event._meta = nil, nil, nil
+  return event
 end
 
 ---@param adapter agent_sdk.ACPAdapter
@@ -493,6 +541,11 @@ function Connection.connect(adapter, opts)
         return emit({ type = "error", message = "agent-sdk.nvim: " .. err })
       end
       adapter.capabilities.models = connection:models()
+
+      connection:wait_idle()
+      if state.cancelled then
+        return
+      end
 
       state.prompt = connection:prompt(request.content, {
         text = function(text)

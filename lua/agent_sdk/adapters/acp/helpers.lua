@@ -1,6 +1,6 @@
 local M = {}
 
----Turn the prompt's content blocks into ACP content blocks
+---Drop image blocks when the agent can't take images
 ---@param self agent_sdk.ACPAdapter
 ---@param args { messages: table, capabilities: table }
 ---@return table
