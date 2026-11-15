@@ -125,12 +125,16 @@ Tool calls are passed straight through to the plugin's `on.request.tool_call` ha
 ## Adapters
 
 - Port CodeCompanion's clients and adapters, keeping its structure and names, and drop what the SDK doesn't need ([0014](adr/0014-transports-and-adapters-are-ports-of-codecompanion.md))
+- The ACP client follows CodeCompanion's flow with leaner code and its own names. Each file's header names the CodeCompanion file it came from
 - HTTP adapters use CodeCompanion's nested handlers (`lifecycle`, `request`, `response`, `tools`) and its `schema`
 - An adapter is included only if it needs code beyond config
 - OpenRouter is the one exception and ships as its own adapter because of its scale. It extends `openai_compatible`
 - `openai_compatible` is the base for everything else. Providers like Novita are config examples in the docs, not adapters
 - HTTP: Anthropic, OpenAI Responses, OpenAI Chat Completions, `openai_compatible`, Gemini, Ollama, OpenRouter. Copilot is still to decide, as its token exchange is vendor-specific
-- ACP: one generic adapter that takes a command, plus presets for Claude Code, Codex and Gemini CLI
+- ACP: CodeCompanion's ACP adapter shape (`commands`, `defaults`, `parameters`, `handlers`), plus presets for Claude Code, Codex and Gemini CLI. Claude Code is built
+- The user sets an agent's session options (`model`, `mode`, `thought_level`) in `defaults.session_config_options`, by category. Presets set none. A value the agent doesn't offer ends the prompt in an error
+- The session's model goes through the agent's `model` option
+- `system_prompt` is sent only to an agent that advertises `systemPrompt`, as CodeCompanion does
 
 ## Testing
 
@@ -160,7 +164,7 @@ Ideas only. Not designed yet.
 
 ## Next step
 
-Built: the adapter registry, sessions, events, requests, the test adapter, the HTTP transport and the Anthropic adapter. A demo plugin lives in [agent-sdk-demo.nvim](../../agent-sdk-demo.nvim).
+Built: the adapter registry, sessions, events, requests, the test adapter, the HTTP transport, the Anthropic adapter, the ACP transport and the Claude Code preset. A demo plugin lives in [agent-sdk-demo.nvim](../../agent-sdk-demo.nvim).
 
-1. Build the Claude Code preset and the ACP transport
+1. Try the demo plugin against Claude Code, and change what feels wrong
 2. Build bottleneck.nvim on it. Rewrite the README's examples from that experience, as the current ones are a sketch

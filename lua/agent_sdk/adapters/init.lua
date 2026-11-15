@@ -37,7 +37,7 @@ end
 ---@param name string
 ---@return table?
 local function load_builtin(name)
-  for _, kind in ipairs({ "http" }) do
+  for _, kind in ipairs({ "http", "acp" }) do
     local ok, adapter = pcall(require, ("agent_sdk.adapters.%s.%s"):format(kind, name))
     if ok and type(adapter) == "table" then
       return adapter
@@ -79,6 +79,8 @@ function M.resolve(name)
   )
   if adapter.type == "http" and adapter.connect == nil then
     adapter.connect = require("agent_sdk.http").connect
+  elseif adapter.type == "acp" and adapter.connect == nil then
+    adapter.connect = require("agent_sdk.acp").connect
   end
   return setmetatable(adapter, Adapter)
 end

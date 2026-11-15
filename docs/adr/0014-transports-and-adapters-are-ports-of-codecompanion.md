@@ -9,4 +9,5 @@ This supersedes [0010](0010-provider-reply-blocks-are-stored-as-received.md). Th
 - HTTP adapters use CodeCompanion's nested handler names (`lifecycle.setup`, `request.build_messages`, `response.parse_chat`, `tools.format_calls`) and its `schema`. ACP adapters use its `commands`, `defaults`, `parameters` and `handlers`
 - Tool calls in the history are OpenAI-shaped (`function.name`, `function.arguments` as JSON), as in CodeCompanion
 - A fix to CodeCompanion's clients or adapters can be carried across, and the other way round
+- The ACP client keeps CodeCompanion's flow (start the agent, initialize, authenticate, create the session, apply the config options, prompt) but is slimmed down and renamed. Each file's header names the CodeCompanion file it came from
 - Event fields come from the provider's or ACP's spec. Anything outside it, like ACP's `_meta`, goes in `meta`

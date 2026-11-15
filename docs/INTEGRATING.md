@@ -130,7 +130,7 @@ Events tell the plugin something and ask nothing of it.
 | `on.text` | `event.text`, a piece of the answer |
 | `on.reasoning` | `event.text`, a piece of the reasoning |
 | `on.usage` | Token counts |
-| `on.tool_update` | `update.id`, `update.status` (`completed`, `failed`), `update.output`. Sent when the plugin answers the call |
+| `on.tool_update` | `update.id`, `update.status` (`pending`, `in_progress`, `completed`, `failed`), `update.output`. On ACP, also `title`, `kind`, `content`, `locations`, `arguments` and `meta`. On HTTP, sent when the plugin answers the call |
 | `on.done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
 | `on.error` | `event.message`, `event.cancelled`, `event.prompt` |
 
@@ -140,7 +140,7 @@ Requests ask the plugin for something. The reply waits until the handler answers
 
 | Handler | Payload |
 | --- | --- |
-| `on.request.tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.title` and `call.kind` |
+| `on.request.tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.name` is `nil` as ACP has no tool names: use `call.title`, `call.kind`, `call.status`, and `call.meta` for the agent's own extras |
 | `on.request.permission` | `request.tool_call`, `request.options` (each with `id`, `name`, `kind`), `request.respond(option_id)` |
 
 ```lua
