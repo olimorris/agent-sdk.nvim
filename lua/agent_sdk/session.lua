@@ -11,15 +11,23 @@ local M = {}
 ---@field request fun(self: agent_sdk.Connection, request: agent_sdk.Request, emit: fun(event: table)): fun()?
 ---@field close fun(self: agent_sdk.Connection)
 
+---@class agent_sdk.Handlers
+---@field text fun(event: table)?
+---@field reasoning fun(event: table)?
+---@field usage fun(event: table)?
+---@field done fun(reply: agent_sdk.Reply)?
+---@field error fun(event: table)?
+---@field request { tool_call: fun(call: table)?, permission: fun(request: table)? }?
+
 ---@class agent_sdk.SessionOpts
 ---@field adapter agent_sdk.Adapter
 ---@field model string?
 ---@field system_prompt string?
----@field on table<string, fun(event: table)>?
+---@field on agent_sdk.Handlers?
 
 ---@class agent_sdk.PromptOpts
 ---@field stream boolean?
----@field on table<string, fun(event: table)>?
+---@field on agent_sdk.Handlers?
 
 ---@class agent_sdk.Reply
 ---@field text string
@@ -32,7 +40,7 @@ local M = {}
 ---@field adapter agent_sdk.Adapter
 ---@field model string?
 ---@field system_prompt string?
----@field on table<string, fun(event: table)>
+---@field on agent_sdk.Handlers
 ---@field closed boolean
 local Session = {}
 Session.__index = Session
@@ -115,8 +123,18 @@ local function build_reply(turn)
   }
 end
 
+local requests = { tool_call = "tool_call", permission_request = "permission" }
+
+local function handler_for(session, turn, kind)
+  local request = requests[kind]
+  if request then
+    return (turn.on.request or {})[request] or (session.on.request or {})[request]
+  end
+  return turn.on[kind] or session.on[kind]
+end
+
 local function deliver(session, turn, event)
-  local handler = turn.on[event.type] or session.on[event.type]
+  local handler = handler_for(session, turn, event.type)
   if handler then
     return call(handler, event)
   end
@@ -142,7 +160,7 @@ local function finish(session, turn, reply, err)
   if reply then
     vim.list_extend(session.messages, turn.messages)
     flush(session, turn)
-    local handler = turn.on.done or session.on.done
+    local handler = handler_for(session, turn, "done")
     if handler then
       call(handler, reply)
     end
@@ -209,7 +227,7 @@ local function send_tool_results(session, turn)
   send(session, turn)
 end
 
-local function end_round(session, turn)
+local function end_round(session, turn, raw)
   local round = turn.round
   round.ended = true
   turn.cancel = nil
@@ -225,6 +243,9 @@ local function end_round(session, turn)
   end
   if #round.tool_calls > 0 then
     assistant.tools = { calls = vim.deepcopy(round.tool_calls) }
+  end
+  if raw.data ~= nil then
+    assistant.data = raw.data
   end
   turn.messages[#turn.messages + 1] = assistant
 
@@ -291,7 +312,7 @@ local function request_permission(session, turn, raw)
     transport_respond(option_id)
   end
 
-  local handler = turn.on.permission_request or session.on.permission_request
+  local handler = handler_for(session, turn, "permission_request")
   if not handler then
     return reject(raw.options, respond)
   end
@@ -305,7 +326,7 @@ local function process(session, turn, raw)
 
   local kind = raw.type
   if kind == "done" then
-    return end_round(session, turn)
+    return end_round(session, turn, raw)
   elseif kind == "error" then
     return finish(session, turn, nil, raw)
   elseif kind == "permission_request" then

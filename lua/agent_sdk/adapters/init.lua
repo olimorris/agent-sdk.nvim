@@ -69,6 +69,9 @@ function M.resolve(name)
   local adapter = vim.deepcopy(value)
   adapter.name = name
   adapter.capabilities = vim.tbl_deep_extend("force", M.default_capabilities(), adapter.capabilities or {})
+  if adapter.type == "http" and adapter.connect == nil then
+    adapter.connect = require("agent_sdk.http").connect
+  end
   return setmetatable(adapter, Adapter)
 end
 

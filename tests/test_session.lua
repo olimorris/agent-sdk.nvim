@@ -19,9 +19,10 @@ end
 
 local function recorder(types)
   local log = {}
-  local on = {}
+  local on = { request = {} }
   for _, kind in ipairs(types) do
-    on[kind] = function(event)
+    local handlers = kind == "tool_call" and on.request or on
+    handlers[kind] = function(event)
       log[#log + 1] = { kind, event }
     end
   end
@@ -112,10 +113,12 @@ T["needs_result is true on http and false on acp"] = function()
     session
       :prompt("hi", {
         on = {
-          tool_call = function(call)
-            seen = call
-            call.respond("result")
-          end,
+          request = {
+            tool_call = function(call)
+              seen = call
+              call.respond("result")
+            end,
+          },
         },
       })
       :wait(1000)
@@ -139,7 +142,7 @@ T["stream = false holds events until the reply is complete"] = function()
   })
   local log, on = recorder(ALL)
   local delivered_at_permission
-  on.permission_request = function(request)
+  on.request.permission = function(request)
     delivered_at_permission = #log
     request.respond("allow")
   end
@@ -354,10 +357,12 @@ local function answering(log)
     text = function(event)
       log[#log + 1] = "text:" .. event.text
     end,
-    tool_call = function(call)
-      log[#log + 1] = "tool_call:" .. call.id
-      call.respond("contents of " .. call.arguments.path)
-    end,
+    request = {
+      tool_call = function(call)
+        log[#log + 1] = "tool_call:" .. call.id
+        call.respond("contents of " .. call.arguments.path)
+      end,
+    },
     done = function(reply)
       log[#log + 1] = "done:" .. reply.text
     end,
@@ -398,9 +403,11 @@ T["nothing is sent until every tool call is answered, and results keep call orde
   local calls = {}
   local task = session:prompt("go", {
     on = {
-      tool_call = function(call)
-        calls[call.id] = call
-      end,
+      request = {
+        tool_call = function(call)
+          calls[call.id] = call
+        end,
+      },
     },
   })
   vim.wait(50)
@@ -423,9 +430,11 @@ T["a failed tool call is sent as an error result"] = function()
   session
     :prompt("go", {
       on = {
-        tool_call = function(call)
-          call.fail("Could not read a.lua")
-        end,
+        request = {
+          tool_call = function(call)
+            call.fail("Could not read a.lua")
+          end,
+        },
       },
     })
     :wait(1000)
@@ -475,9 +484,11 @@ T["stopping while a tool call is unanswered sends nothing more"] = function()
   local pending, stopped
   local task = session:prompt("go", {
     on = {
-      tool_call = function(call)
-        pending = call
-      end,
+      request = {
+        tool_call = function(call)
+          pending = call
+        end,
+      },
       error = function(event)
         stopped = event
       end,
@@ -501,10 +512,12 @@ T["on acp, respond and fail do nothing"] = function()
   local reply = session
     :prompt("go", {
       on = {
-        tool_call = function(call)
-          call.respond("ignored")
-          call.fail("ignored")
-        end,
+        request = {
+          tool_call = function(call)
+            call.respond("ignored")
+            call.fail("ignored")
+          end,
+        },
       },
     })
     :wait(1000)
@@ -581,6 +594,37 @@ local function permission(options)
   }
 end
 
+T["a prompt's request handler replaces the session's for that request only"] = function()
+  local _, session = make({
+    type = "acp",
+    replies = { { permission(ALLOW_AND_REJECT), { type = "tool_call", id = "t" }, DONE } },
+  }, {
+    on = {
+      request = {
+        permission = function(request)
+          request.respond("allow")
+        end,
+        tool_call = function()
+          error("the prompt's handler should have run")
+        end,
+      },
+    },
+  })
+  local seen
+  session
+    :prompt("go", {
+      on = {
+        request = {
+          tool_call = function(call)
+            seen = call.id
+          end,
+        },
+      },
+    })
+    :wait(1000)
+  eq(seen, "t")
+end
+
 T["a permission handler's response is recorded and the reply continues"] = function()
   local scripted, session = make({
     type = "acp",
@@ -590,10 +634,12 @@ T["a permission handler's response is recorded and the reply continues"] = funct
   local reply = session
     :prompt("hi", {
       on = {
-        permission_request = function(request)
-          seen = request
-          request.respond("allow")
-        end,
+        request = {
+          permission = function(request)
+            seen = request
+            request.respond("allow")
+          end,
+        },
       },
     })
     :wait(1000)
@@ -635,10 +681,12 @@ T["respond twice records once"] = function()
   session
     :prompt("hi", {
       on = {
-        permission_request = function(request)
-          request.respond("allow")
-          request.respond("reject")
-        end,
+        request = {
+          permission = function(request)
+            request.respond("allow")
+            request.respond("reject")
+          end,
+        },
       },
     })
     :wait(1000)
@@ -655,10 +703,12 @@ T["permission requests are not held when stream = false"] = function()
         text = function()
           order[#order + 1] = "text"
         end,
-        permission_request = function(request)
-          order[#order + 1] = "permission"
-          request.respond("allow")
-        end,
+        request = {
+          permission = function(request)
+            order[#order + 1] = "permission"
+            request.respond("allow")
+          end,
+        },
       },
     })
     :wait(1000)
@@ -671,9 +721,11 @@ T["respond does nothing once the turn has finished"] = function()
   local late
   session:prompt("hi", {
     on = {
-      permission_request = function(request)
-        late = request.respond
-      end,
+      request = {
+        permission = function(request)
+          late = request.respond
+        end,
+      },
     },
   })
   vim.wait(30)
@@ -875,6 +927,17 @@ T["the effective model is the session's or the adapter's"] = function()
   sdk.setup({ adapters = { scripted = scripted } })
   sdk.session({ adapter = sdk.adapter("scripted"), model = "override" }):prompt("a"):wait(1000)
   eq(scripted.requests[1].model, "override")
+end
+
+T["done data is stored on the assistant message and not shown to handlers"] = function()
+  local _, session =
+    make({ replies = { { text("hi"), { type = "done", data = { provider = "x", content = { 1 } } } } } })
+  local log, on = recorder(ALL)
+  local reply = session:prompt("q", { on = on }):wait(1000)
+
+  eq(session.messages[2], { role = "llm", content = "hi", data = { provider = "x", content = { 1 } } })
+  eq(reply.data, nil)
+  eq(log[#log][2].data, nil)
 end
 
 return T

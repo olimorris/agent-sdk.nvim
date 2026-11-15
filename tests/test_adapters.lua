@@ -97,7 +97,7 @@ T["extend errors for an unknown built-in"] = function()
 end
 
 T["session errors without connect"] = function()
-  sdk.setup({ adapters = { bare = { type = "http" } } })
+  sdk.setup({ adapters = { bare = { type = "acp" } } })
   MiniTest.expect.error(function()
     sdk.session({ adapter = sdk.adapter("bare") })
   end, "connect")

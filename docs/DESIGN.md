@@ -11,6 +11,7 @@ agent-sdk.nvim is a headless library that does this once. Users configure their 
 - Requires Neovim nightly (0.13-dev) because it is built on `vim.async`
 - The Lua module is `agent_sdk`
 - `README.md` holds a sketch of the API. `INTEGRATING.md` is the full reference, written for a plugin author to hand to their coding agent
+- The reasons behind the decisions in this document are recorded in [adr/](adr/README.md)
 
 ## Relationship to CodeCompanion
 
@@ -41,7 +42,8 @@ The SDK is the connection layer only:
 
 - No agent loop. Plugins decide what every tool call does and when to stop. The SDK only sends the plugin's results back
 - No UI. Plugins own every buffer and window
-- No file or terminal handlers for ACP agents
+- No file handlers for ACP agents. The SDK reserves the requests (`on.request.read_file`, `on.request.write_file`) but ships no implementation
+- No terminals for ACP agents. An agent runs commands in its own shell, behind a permission request
 
 ## Sessions
 
@@ -70,31 +72,37 @@ Every adapter is used through a session and `session:prompt()`.
 - `session:set_messages(...)` changes nothing and returns `false, err`. It doesn't raise, so a plugin that was only tested on HTTP keeps working on an agent
 - One agent process per session, started on the first prompt. The SDK kills it when the session ends and on `VimLeavePre`
 - `system_prompt` is added to the agent's own instructions. On HTTP, it is the whole system prompt
-- An agent is told it can read files, write files or run terminals only when the plugin has declared handlers for them. Requests without a handler are rejected
+- An agent is never told the editor can read files, write files or run terminals. `on.request.read_file` and `on.request.write_file` are reserved for when that changes, and aren't built
 - Permission requests with no plugin handler are rejected
-- A `permission_request` gives the plugin `request.tool_call`, `request.options` and `request.respond(option_id)`. Option fields are snake_case (`option.id`, not ACP's `optionId`). `request.respond(nil)` cancels
+- `on.request.permission` gives the plugin `request.tool_call`, `request.options` and `request.respond(option_id)`. Option fields are snake_case (`option.id`, not ACP's `optionId`). `request.respond(nil)` cancels
 - The agent waits until the handler calls `request.respond()`. A handler that never responds leaves the reply hanging, and the docs say so
 
 ## Events
 
-Every adapter emits the same events, so plugins never see provider-specific chunks:
+Every adapter emits the same events, so plugins never see provider-specific chunks. Handlers come in two groups.
 
-- `text`
-- `reasoning`
-- `tool_call`
-- `usage`
-- `done`
-- `error`
-- `permission_request` (ACP)
+Events tell the plugin something, and ask nothing of it:
+
+- `on.text`
+- `on.reasoning`
+- `on.usage`
+- `on.done`
+- `on.error`
+
+Requests ask the plugin for something, and the reply waits for its answer. They sit under `on.request`:
+
+- `on.request.tool_call`
+- `on.request.permission` (ACP)
+- `on.request.read_file` and `on.request.write_file` (ACP, reserved, not built)
 
 Every adapter supports `stream = false`. The plugin gets the same events in one burst once the reply is complete, so its code doesn't change between modes. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Where a provider supports only one mode, the SDK covers the other: it collects a stream into one reply, or sends a complete reply as one burst of events.
 
-Tool calls are passed straight through to the plugin as `tool_call` events.
+Tool calls are passed straight through to the plugin's `on.request.tool_call` handler.
 
 - A prompt isn't done while a tool call is unanswered. The plugin answers on the event with `call.respond(content)` or `call.fail(message)`
 - When every call in a reply is answered, the SDK sends the results and the same prompt carries on. The plugin sees one `done`, with the whole answer, as it does on ACP
 - The SDK pairs the ids, so the history never holds a tool call without its result
-- A `tool_call` handler that never answers leaves the reply hanging, the same rule as `permission_request`. With no handler, the SDK fails the call
+- A request handler that never answers leaves the reply hanging. With no `tool_call` handler, the SDK fails the call. With no `permission` handler, it rejects the request
 - On ACP the agent runs the tool itself, so `call.respond` and `call.fail` do nothing
 
 - Every handler receives an event table (`event.text`, `event.message`), so every event has the same shape
@@ -103,7 +111,7 @@ Tool calls are passed straight through to the plugin as `tool_call` events.
 - `done` receives the whole reply: `reply.text`, `reply.reasoning` and `reply.usage`. `done` always means a reply was added to the history
 - Stopping a reply ends the prompt with an `error` whose `event.cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
 - A prompt that ends in `error` adds nothing to the history, not even the prompt itself. The `error` event carries it as `event.prompt`, so the plugin can send it again or return it to the user
-- `tool_call` events carry `needs_result`. It is `true` on HTTP, where the plugin owes a result, and `false` on ACP, where the agent runs the tool itself
+- Tool calls carry `needs_result`. It is `true` on HTTP, where the plugin owes a result, and `false` on ACP, where the agent runs the tool itself
 - `reply.tool_calls` lists every tool call in the prompt, and `reply.usage` adds up every request the prompt made
 
 ## Async
@@ -129,7 +137,7 @@ The SDK ships a public test adapter that replays a scripted stream of events, so
 
 - `require("agent_sdk.test").adapter({ replies = ... })`. Each entry in `replies` is the reply to one request. A prompt whose reply has a tool call makes a second request once the call is answered
 - Each reply ends with an explicit `done` or `error`, so a test can script either
-- `type = "acp"` scripts an agent: `permission_request` events, and `session:set_messages()` returning `false, err`
+- `type = "acp"` scripts an agent: permission requests, and `session:set_messages()` returning `false, err`
 - `scripted.responses` lists the option ids the plugin's permission handlers responded with
 - Tests add the test adapter through `agent_sdk.setup()`, standing in for the user
 
@@ -138,8 +146,7 @@ The SDK ships a public test adapter that replays a scripted stream of events, so
 - Handler naming and sections
 - When CodeCompanion moves onto the SDK, and what its shim looks like
 - Moving the plugins that use `codecompanion.http` and `codecompanion.adapters` to the SDK
-- How a plugin gives the model its tool definitions on HTTP
-- The API for declaring file and terminal handlers for ACP agents
+- How a plugin gives the model its tool definitions on HTTP. Until this exists, only the test adapter produces tool calls on HTTP
 
 ## Further ahead
 
@@ -152,6 +159,8 @@ Ideas only. Not designed yet.
 
 ## Next step
 
-1. Write the call sites for the two open APIs (tool results on HTTP, file and terminal handlers on ACP) from a plugin that uses tools, before building sessions
-2. Build one working slice: the test adapter, then sessions and events, then the Anthropic adapter, then the Claude Code preset
-3. Build bottleneck.nvim against the test adapter in parallel. Rewrite the README's examples from that experience, as the current ones are a sketch
+Built: the adapter registry, sessions, events, requests, the test adapter, the HTTP transport and the Anthropic adapter. A demo plugin lives in [agent-sdk-demo.nvim](../../agent-sdk-demo.nvim).
+
+1. Try the SDK from the demo plugin against Anthropic, and change what feels wrong
+2. Build the Claude Code preset and the ACP transport
+3. Build bottleneck.nvim on it. Rewrite the README's examples from that experience, as the current ones are a sketch

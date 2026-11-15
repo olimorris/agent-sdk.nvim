@@ -68,9 +68,11 @@ T["scripted.responses fills in through setup and sdk.adapter"] = function()
   local session = sdk.session({
     adapter = sdk.adapter("scripted"),
     on = {
-      permission_request = function(request)
-        request.respond("yes")
-      end,
+      request = {
+        permission = function(request)
+          request.respond("yes")
+        end,
+      },
     },
   })
   session:prompt("a"):wait(1000)

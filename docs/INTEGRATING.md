@@ -47,9 +47,9 @@ Resolve the adapter when the conversation starts rather than in the plugin's set
 
 Every session needs `text`, `done` and `error` handlers. The `error` handler skips events where `event.cancelled` is `true`, because the plugin stopped that reply itself.
 
-If the adapter can be ACP (any adapter can be, as the user picks it), the session also needs a **permission policy**: a `permission_request` handler that decides by `request.tool_call.kind`. Work out the policy from the conversation's purpose. A reviewer reads and searches, so it allows `read` and `search` and rejects everything else. Every path through the handler calls `request.respond()`.
+If the adapter can be ACP (any adapter can be, as the user picks it), the session also needs a **permission policy**: an `on.request.permission` handler that decides by `request.tool_call.kind`. Work out the policy from the conversation's purpose. A reviewer reads and searches, so it allows `read` and `search` and rejects everything else. Every path through the handler calls `request.respond()`.
 
-Done when every conversation from step 1 starts this way, and every session has `text`, `done`, `error` and `permission_request` handlers.
+Done when every conversation from step 1 starts this way, and every session has `text`, `done`, `error` and `request.permission` handlers.
 
 ### 4. Prompt
 
@@ -72,7 +72,7 @@ Write tests with the test adapter, added through `agent_sdk.setup()` as a user w
 
 - A reply that streams and ends in `done`
 - A reply that ends in `error`
-- For each permission policy, one `permission_request` the policy allows and one it rejects, checked through `scripted.responses`
+- For each permission policy, one permission request the policy allows and one it rejects, checked through `scripted.responses`
 
 Done when the tests pass with no network access and no API keys set.
 
@@ -119,19 +119,42 @@ local session = sdk.session({
 `opts`:
 
 - `stream`: `false` delivers every event in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Defaults to `true`
-- `on`: handlers for this prompt only. Each replaces the session's handler for the same event
+- `on`: handlers for this prompt only. Each replaces the session's handler for the same event or request
 
 ### Events
 
-| Event | Payload |
+Events tell the plugin something and ask nothing of it.
+
+| Handler | Payload |
 | --- | --- |
-| `text` | `event.text` |
-| `reasoning` | `event.text` |
-| `tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.title` and `call.kind` |
-| `usage` | Token counts |
-| `done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
-| `error` | `event.message`, `event.cancelled`, `event.prompt` |
-| `permission_request` | `request.tool_call`, `request.options` (each with `id`, `name`, `kind`), `request.respond(option_id)` |
+| `on.text` | `event.text`, a piece of the answer |
+| `on.reasoning` | `event.text`, a piece of the reasoning |
+| `on.usage` | Token counts |
+| `on.done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
+| `on.error` | `event.message`, `event.cancelled`, `event.prompt` |
+
+### Requests
+
+Requests ask the plugin for something. The reply waits until the handler answers.
+
+| Handler | Payload |
+| --- | --- |
+| `on.request.tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.title` and `call.kind` |
+| `on.request.permission` | `request.tool_call`, `request.options` (each with `id`, `name`, `kind`), `request.respond(option_id)` |
+
+```lua
+on = {
+  text = function(event) end,
+  done = function(reply) end,
+  error = function(event) end,
+  request = {
+    tool_call = function(call) end,
+    permission = function(request) end,
+  },
+}
+```
+
+`on.request.read_file` and `on.request.write_file` are reserved for ACP agents and aren't built.
 
 `tool_call.kind` and `option.kind` use ACP's values: tool kinds `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `other`; option kinds `allow_once`, `allow_always`, `reject_once`, `reject_always`.
 
@@ -142,9 +165,9 @@ local session = sdk.session({
 - Stopping a reply ends the prompt with an `error` whose `cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
 - A prompt that ends in `error` adds nothing to the history, not even the prompt itself. `event.prompt` holds what was passed to `session:prompt()`, so the plugin can send it again or return it to the user
 - Calling `session:prompt()` or `session:ask()` while a reply is in progress raises an error
-- A `permission_request` handler must call `request.respond()`. The agent waits until it does. `request.respond(nil)` cancels
-- Without a `permission_request` handler, the SDK rejects every request
-- A `tool_call` handler must call `call.respond()` or `call.fail()` when `call.needs_result` is `true`. The prompt carries on once every call is answered, and ends in one `done`. Without a `tool_call` handler, the SDK fails every call
+- An `on.request.permission` handler must call `request.respond()`. The agent waits until it does. `request.respond(nil)` cancels
+- Without an `on.request.permission` handler, the SDK rejects every request
+- An `on.request.tool_call` handler must call `call.respond()` or `call.fail()` when `call.needs_result` is `true`. The prompt carries on once every call is answered, and ends in one `done`. Without one, the SDK fails every call
 - The SDK closes every open session on `VimLeavePre`
 
 ### HTTP and ACP
@@ -153,8 +176,8 @@ The plugin's code is the same for both, except:
 
 - An ACP agent keeps its own history. `session.messages` is a record of the prompts, text, reasoning and tool calls the SDK saw, and is never sent back to the agent. `session:set_messages()` changes nothing and returns `false, err`
 - On ACP, `system_prompt` is added to the agent's own instructions. On HTTP, it is the whole system prompt
-- On ACP, `tool_call` events have `needs_result = false`: the agent runs the tool itself, and `call.respond()` and `call.fail()` do nothing. On HTTP, `needs_result` is `true` and the plugin owes a result. The API for giving the model the plugin's tool definitions isn't designed yet, so stop and ask the user if the plugin needs tools
-- On ACP, the agent is told it can read files, write files or run terminals through Neovim only when the plugin declares handlers for them. The API for declaring them isn't designed yet
+- On ACP, tool calls have `needs_result = false`: the agent runs the tool itself, and `call.respond()` and `call.fail()` do nothing. On HTTP, `needs_result` is `true` and the plugin owes a result. The API for giving the model the plugin's tool definitions isn't designed yet, so stop and ask the user if the plugin needs tools
+- An ACP agent reads files, writes files and runs commands itself, behind permission requests. It can't do any of these through Neovim, so it doesn't see unsaved changes
 - The SDK starts an ACP agent's process on the first prompt, so the first reply is slower
 
 ### Test adapter
@@ -175,4 +198,4 @@ local scripted = require("agent_sdk.test").adapter({
 require("agent_sdk").setup({ adapters = { scripted = scripted } })
 ```
 
-A `permission_request` event in a script takes `tool_call` and `options` as in [Events](#events). `scripted.responses` lists the option ids the plugin's handlers responded with, in order.
+A `permission_request` event in a script reaches the plugin's `on.request.permission` handler. It takes `tool_call` and `options` as in [Requests](#requests). `scripted.responses` lists the option ids the plugin's handlers responded with, in order.
