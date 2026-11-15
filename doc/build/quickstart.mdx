@@ -1,0 +1,79 @@
+---
+title: "Stream your first reply from a plugin"
+sidebarTitle: "Quickstart"
+description: "Add Agent SDK to a Neovim plugin: take the user's adapter by name, start a session and stream a reply into a buffer."
+keywords: ["quickstart", "plugin", "session", "prompt", "streaming"]
+---
+
+This page takes a plugin from nothing to a streamed reply in a buffer. The SDK owns adapters, credentials, history and the transport. Your plugin owns every buffer and window, the prompts it sends, and what it does with the replies.
+
+<Steps>
+  <Step title="Take the user's adapter as an option">
+    Add one `adapter` option to your plugin's setup. It takes the name the user gave the adapter in `agent_sdk.setup()`, or a table with a name and a model:
+
+    ```lua
+    require("your_plugin").setup({ adapter = "anthropic" })
+    require("your_plugin").setup({ adapter = { name = "anthropic", model = "claude-opus-5-5" } })
+    ```
+
+    API keys, URLs and adapter definitions live in the user's `agent_sdk.setup()`, so your plugin's config holds only the name and the model. Link to [Configure adapters](/configure/adapters) from your README.
+  </Step>
+  <Step title="Resolve the adapter">
+    Resolve it when a conversation starts, not in your plugin's setup, as the user may call `agent_sdk.setup()` after yours:
+
+    ```lua
+    local sdk = require("agent_sdk")
+
+    local adapter, err = sdk.adapter(config.adapter.name)
+    if not adapter then
+      return vim.notify(err, vim.log.levels.ERROR)
+    end
+    ```
+  </Step>
+  <Step title="Start a session">
+    Write your handlers once. They run for every prompt in the session:
+
+    ```lua
+    local session = sdk.session({
+      adapter = adapter,
+      model = config.adapter.model,
+      on = {
+        text = function(event)
+          append(buf, event.text)
+        end,
+        done = function(reply)
+          vim.bo[buf].modifiable = false
+        end,
+        error = function(event)
+          if not event.cancelled then
+            vim.notify(event.message, vim.log.levels.ERROR)
+          end
+        end,
+      },
+    })
+    ```
+
+    `append` is your plugin's own function that writes to a buffer. `sdk.session()` returns straight away. Nothing is sent until the first prompt.
+  </Step>
+  <Step title="Send a prompt">
+    ```lua
+    session:prompt("Why was the nil check moved?")
+    ```
+
+    `text` runs for each piece of the answer as it streams, then `done` runs with the whole reply.
+  </Step>
+  <Step title="Close the session">
+    Call `session:close()` when the conversation ends, such as when its window closes. For an ACP agent, this stops the agent's process.
+  </Step>
+</Steps>
+
+## Next steps
+
+<Columns cols={2}>
+  <Card title="Sessions and prompts" icon="messages-square" href="/build/sessions">
+    Stop a reply, wait for it in a task, and read the history.
+  </Card>
+  <Card title="Permissions" icon="shield-check" href="/build/permissions">
+    Any adapter can be an agent. Decide what it's allowed to do.
+  </Card>
+</Columns>

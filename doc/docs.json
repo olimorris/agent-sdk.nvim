@@ -1,0 +1,62 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "AgentSDK.nvim",
+  "colors": {
+    "primary": "#439240",
+    "light": "#88C649",
+    "dark": "#439240"
+  },
+  "appearance": {
+    "default": "system",
+    "strict": false
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/images/logo.png",
+    "dark": "/images/logo.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/olimorris/agent-sdk.nvim"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/olimorris/agent-sdk.nvim"
+    }
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get started",
+        "pages": ["index", "installation"]
+      },
+      {
+        "group": "Configure",
+        "pages": ["configure/adapters", "configure/anthropic", "configure/claude-code"]
+      },
+      {
+        "group": "Build a plugin",
+        "pages": [
+          "build/quickstart",
+          "build/sessions",
+          "build/tool-calls",
+          "build/permissions",
+          "build/errors",
+          "build/testing",
+          "build/integrating"
+        ]
+      },
+      {
+        "group": "Walkthroughs",
+        "pages": ["walkthroughs/http-reply", "walkthroughs/agent-reply"]
+      },
+      {
+        "group": "Reference",
+        "pages": ["reference/api", "reference/http-and-acp"]
+      }
+    ]
+  }
+}

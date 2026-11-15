@@ -1,0 +1,64 @@
+---
+title: "Answer tool calls from a model or agent"
+sidebarTitle: "Tool calls"
+description: "Handle tool calls in Agent SDK. On HTTP your plugin runs the tool and answers the call. On ACP the agent runs it and your plugin follows along."
+keywords: ["tool calls", "tool_call", "tool_update", "respond", "fail"]
+---
+
+A tool call is the model asking your plugin for something, so it arrives in `on.request.tool_call`. A prompt isn't done while a tool call is unanswered. Your plugin answers, and the same prompt carries on.
+
+```lua
+on = {
+  request = {
+    tool_call = function(call)
+      if call.name ~= "read_file" then
+        return call.fail("Unknown tool: " .. tostring(call.name))
+      end
+      local text, err = read_file(call.arguments.path)
+      if text then
+        call.respond(text)
+      else
+        call.fail(err)
+      end
+    end,
+  },
+}
+```
+
+`read_file` is your plugin's own function, returning a file's text including unsaved changes.
+
+<Note>
+The API for giving an HTTP model your plugin's tool definitions isn't built yet. Until it is, only the [test adapter](/build/testing) produces tool calls on HTTP.
+</Note>
+
+## Answering a call
+
+When `call.needs_result` is `true`, your handler must call `call.respond(content)` or `call.fail(message)`. Once every call in a reply is answered, the SDK sends the results and the prompt carries on. Your plugin sees one `done`, with the whole answer.
+
+A handler that never answers leaves the reply hanging. Without a `tool_call` handler, the SDK fails every call.
+
+## Following a call's progress
+
+`on.tool_update` reports a call's `status`: `pending`, `in_progress`, `completed` or `failed`.
+
+```lua
+on = {
+  tool_update = function(update)
+    set_status(update.id, update.status)
+  end,
+}
+```
+
+On HTTP, the SDK sends `tool_update` once your plugin answers. For a reply that reads one file, the handlers run in this order: `text`, `request.tool_call`, `tool_update`, `text`, `done`.
+
+## On an ACP agent
+
+The same handler runs, but the agent runs its own tools:
+
+- `call.needs_result` is `false`, and `call.respond()` and `call.fail()` do nothing
+- `call.name` is `nil`, as ACP has no tool names. Use `call.title` and `call.kind`, and `call.meta` for the agent's own extras
+- The agent asks before running a tool. Your plugin answers in a [permission handler](/build/permissions)
+
+## In the reply and history
+
+`reply.tool_calls` lists every tool call in the prompt, with the latest `status` and `output`. The history pairs every call with its result. See the [walkthrough](/walkthroughs/http-reply) for the full sequence.

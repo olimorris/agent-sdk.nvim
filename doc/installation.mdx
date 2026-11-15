@@ -1,0 +1,45 @@
+---
+title: "Install Agent SDK"
+sidebarTitle: "Installation"
+description: "Install Agent SDK with your plugin manager. It needs Neovim nightly for vim.async, and curl for HTTP adapters."
+keywords: ["install", "lazy.nvim", "vim.pack", "requirements"]
+---
+
+Agent SDK is a Lua library with no plugin dependencies. Install it once, and every plugin built on it shares it.
+
+## Requirements
+
+- Neovim nightly (0.13-dev), as the SDK is built on `vim.async`
+- `curl`, for HTTP adapters
+- For ACP adapters, the agent itself. See [Claude Code](/configure/claude-code)
+
+## Install
+
+<Tabs>
+  <Tab title="vim.pack">
+    ```lua
+    vim.pack.add({ "https://github.com/olimorris/agent-sdk.nvim" })
+    ```
+  </Tab>
+  <Tab title="lazy.nvim">
+    ```lua
+    { "olimorris/agent-sdk.nvim" }
+    ```
+  </Tab>
+</Tabs>
+
+A plugin built on the SDK may list it as a dependency, in which case your plugin manager installs it for you.
+
+## Configure
+
+Call `setup()` with your adapters:
+
+```lua
+require("agent_sdk").setup({
+  adapters = {
+    anthropic = "anthropic",
+  },
+})
+```
+
+Then [configure your adapters](/configure/adapters).

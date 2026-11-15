@@ -1,0 +1,37 @@
+---
+title: "Configure the Anthropic adapter"
+sidebarTitle: "Anthropic"
+description: "Connect Agent SDK to Anthropic's Messages API. Set your API key, default model, extended thinking and max tokens."
+keywords: ["anthropic", "claude", "messages api", "extended thinking"]
+---
+
+The `anthropic` adapter talks to Anthropic's Messages API over HTTP. By default it reads your key from the `ANTHROPIC_API_KEY` environment variable.
+
+```lua
+require("agent_sdk").setup({
+  adapters = {
+    anthropic = require("agent_sdk.adapters").extend("anthropic", {
+      env = { api_key = "cmd:op read op://Private/Anthropic_API/credential --no-newline" },
+      schema = {
+        model = { default = "claude-opus-5-5" },
+        extended_thinking = { default = false },
+        max_tokens = { default = 32000 },
+      },
+    }),
+  },
+})
+```
+
+## Settings
+
+| Setting | Default |
+| --- | --- |
+| `env.api_key` | `"ANTHROPIC_API_KEY"` |
+| `schema.model.default` | `"claude-sonnet-5"` |
+| `schema.extended_thinking.default` | `true` for models that can reason |
+| `schema.max_tokens.default` | The model's limit, `64000` |
+| `schema.top_p.default`, `schema.top_k.default`, `schema.stop_sequences.default` | Not sent |
+
+`env.api_key` takes any of the [credential forms](/configure/adapters#credentials).
+
+A plugin's `model` replaces `schema.model.default` for its sessions.

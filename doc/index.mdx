@@ -1,0 +1,39 @@
+---
+title: "AgentSDK.nvim"
+sidebarTitle: "Introduction"
+description: "Connect Neovim plugins to LLMs and agents"
+keywords: ["neovim", "llm", "acp", "agent", "sdk", "lua"]
+---
+
+Every plugin that talks to an LLM builds its own adapters and credential handling, so you set up the same API keys once per plugin. With Agent SDK, you set them up once and every plugin uses them by name.
+
+<Warning>
+Beta, and the API may change. Requires Neovim nightly (0.13-dev).
+</Warning>
+
+## Features
+
+- Configure adapters, credentials and models once, for every plugin
+- Talk to LLMs over HTTP and to agents over [ACP](https://agentclientprotocol.com), with one API
+- Stream replies, or get them whole, with the same handlers
+- Keep the conversation history for you
+- Read API keys from environment variables, files or a password manager
+- Test plugins with a scripted adapter, with no network or API keys
+
+## What it isn't
+
+The SDK is the connection layer only. Your plugin owns everything else:
+
+- **No UI.** Plugins own every buffer and window
+- **No agent loop.** Plugins decide what every tool call does and when to stop
+
+## Where to start
+
+<Columns cols={2}>
+  <Card title="Configure your adapters" icon="sliders-horizontal" href="/configure/adapters">
+    You use a plugin built on the SDK. Set up your API keys and agents once.
+  </Card>
+  <Card title="Build a plugin" icon="code" href="/build/quickstart">
+    You're writing a plugin. Start a session and stream your first reply.
+  </Card>
+</Columns>

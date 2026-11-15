@@ -10,4 +10,4 @@ This supersedes [0010](0010-provider-reply-blocks-are-stored-as-received.md). Th
 - Tool calls in the history are OpenAI-shaped (`function.name`, `function.arguments` as JSON), as in CodeCompanion
 - A fix to CodeCompanion's clients or adapters can be carried across, and the other way round
 - The ACP client keeps CodeCompanion's flow (start the agent, initialize, authenticate, create the session, apply the config options, prompt) but is slimmed down and renamed. Each file's header names the CodeCompanion file it came from
-- Event fields come from the provider's or ACP's spec. Anything outside it, like ACP's `_meta`, goes in `meta`
+- Event fields come from the provider's or ACP's spec. Anything outside it, like ACP's `_meta`, goes in `meta`. A field both transports emit keeps one name, per [0003](0003-one-session-api-for-http-and-acp.md): ACP's `rawInput` is `arguments`, `cachedReadTokens` is `cache_read_input_tokens`

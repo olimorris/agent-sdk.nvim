@@ -1,0 +1,30 @@
+---
+title: "How HTTP adapters and ACP agents differ"
+sidebarTitle: "HTTP and ACP"
+description: "Your plugin's code is the same for HTTP models and ACP agents in Agent SDK. These are the few places where their behaviour differs."
+keywords: ["http", "acp", "differences", "agent", "history", "system prompt"]
+---
+
+Your plugin's code is the same for an HTTP model and an ACP agent. The user picks the adapter, so write for both. These are the places they differ.
+
+| | HTTP | ACP |
+| --- | --- | --- |
+| History | The SDK owns it and sends it on every request | The agent owns it. `session.messages` is a record of what the SDK saw, never sent back |
+| `session:set_messages()` | Replaces the history and returns `true` | Changes nothing and returns `false, err` |
+| `system_prompt` | The whole system prompt | Added to the agent's own instructions |
+| Tool calls | `needs_result = true`. Your plugin runs the tool and answers | `needs_result = false`. The agent runs the tool, and `call.respond()` and `call.fail()` do nothing |
+| `call.name` | The tool's name | `nil`. Use `call.title` and `call.kind` |
+| Files and commands | Only through your plugin's tools | The agent reads, writes and runs commands itself, behind [permission requests](/build/permissions) |
+| First reply | Sent straight away | Slower, as the SDK starts the agent's process on the first prompt |
+
+## Agents work from disk
+
+An ACP agent reads files, writes files and runs commands itself. It can't do any of these through Neovim, so it doesn't see unsaved changes.
+
+## An agent's process can exit
+
+If an ACP agent's process exits, the agent's history goes with it. The prompt in progress ends in an `error`, and so does every later prompt in that session. Start a new session to carry on.
+
+## Why `set_messages()` doesn't raise on ACP
+
+`session:set_messages()` returns `false, err` on an agent rather than raising. A plugin that was only tested on HTTP keeps working when the user picks an agent.

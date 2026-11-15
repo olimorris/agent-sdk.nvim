@@ -1,0 +1,141 @@
+---
+title: "Sessions, prompts and history"
+sidebarTitle: "Sessions"
+description: "Send prompts through an Agent SDK session, stream or wait for the whole reply, stop a reply, and read the conversation history."
+keywords: ["session", "prompt", "ask", "stream", "vim.async", "history", "messages"]
+---
+
+A session is one conversation with a model or agent. You give it an adapter and your handlers, then send it prompts. The SDK keeps the history, so each prompt carries on from the last.
+
+```lua
+local session = sdk.session({
+  adapter = adapter,
+  model = "claude-opus-5-5", -- optional, nil keeps the user's default
+  system_prompt = "You review code. Be brief.", -- optional
+  on = { ... },
+})
+```
+
+`sdk.session()` takes the adapter object, not its name, so you can pass a modified deep copy. You can't change the user's own config.
+
+## Handlers
+
+Handlers in `on` run for every prompt in the session:
+
+```lua
+on = {
+  reasoning = function(event)
+    append(reasoning_buf, event.text)
+  end,
+  text = function(event)
+    append(answer_buf, event.text)
+  end,
+  done = function(reply)
+    vim.bo[answer_buf].modifiable = false
+  end,
+  error = function(event)
+    vim.notify(event.message, vim.log.levels.ERROR)
+  end,
+}
+```
+
+Handlers run on the main loop, so they can write to buffers and windows directly. Every prompt ends with exactly one `done` or one `error`. A handler you don't define is skipped.
+
+`done` receives the whole reply:
+
+```lua
+reply = {
+  text = "It moved because...",
+  reasoning = "The nil check moved above the loop, so...",
+  tool_calls = {},
+  usage = { input_tokens = 1400, output_tokens = 40 },
+}
+```
+
+See the [API reference](/reference/api#events) for every event.
+
+## Sending a prompt
+
+```lua
+session:prompt("Why was the nil check moved?")
+```
+
+A prompt is a string, or a list of content blocks like `{ type = "text", text = "..." }`.
+
+Send one prompt at a time. Calling `session:prompt()` while a reply is in progress raises an error, so disable your plugin's "send" action until `done` or `error` arrives.
+
+### Without streaming
+
+Pass `stream = false` when you parse the reply rather than show it as it arrives:
+
+```lua
+session:prompt("List the changed functions as JSON", { stream = false })
+```
+
+The same handlers run, with every event in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered.
+
+### Handlers for one prompt
+
+`on` in a prompt's options replaces the session's handler for the same event, for that prompt only:
+
+```lua
+session:prompt("Summarise this hunk", {
+  on = {
+    done = function(reply)
+      set_summary(reply.text)
+    end,
+  },
+})
+```
+
+## Stopping a reply
+
+`session:prompt()` returns a `vim.async` task. Close it to stop the reply:
+
+```lua
+local task = session:prompt("Explain this file")
+
+vim.keymap.set("n", "q", function()
+  task:close()
+end, { buffer = buf })
+```
+
+Stopping a reply ends the prompt with an `error` whose `event.cancelled` is `true`. Skip those in your `error` handler, as your plugin stopped the reply itself.
+
+## Waiting for the reply
+
+Inside a `vim.async` task, `session:ask()` waits for the reply and returns `reply, err`, so the code reads top to bottom:
+
+```lua
+vim.async.run(function()
+  local reply, err = session:ask("Is this function pure?", { stream = false })
+  if not reply then
+    return vim.notify(err.message, vim.log.levels.ERROR)
+  end
+  show_verdict(reply.text)
+end)
+```
+
+The session's handlers still run during `session:ask()`, so a buffer can stream while the task waits. Closing the task stops the reply.
+
+## History
+
+`session.messages` holds the conversation, read-only. Replace it with `session:set_messages()`:
+
+```lua
+local messages = vim.deepcopy(session.messages)
+table.remove(messages)
+session:set_messages(messages)
+```
+
+The history uses [CodeCompanion's](https://github.com/olimorris/codecompanion.nvim) provider-neutral message format, and the SDK converts it for each adapter on every request. A prompt that ends in `error` adds nothing to the history. See [Failed prompts](/build/errors).
+
+On an ACP agent, the agent keeps its own history. `session.messages` is only a record of what the SDK saw, and `session:set_messages()` changes nothing and returns `false, err`.
+
+## Closing
+
+```lua
+session:close()
+```
+
+`session:close()` stops any reply in progress and ends the session. For an ACP agent, it stops the agent's process. The SDK closes every open session on `VimLeavePre`.

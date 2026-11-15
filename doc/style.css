@@ -1,0 +1,11 @@
+#content-area a.link {
+  color: #0F59B2;
+  border-bottom-color: #0F59B2;
+  text-decoration-color: #0F59B2;
+}
+
+.dark #content-area a.link {
+  color: #16B0ED;
+  border-bottom-color: #16B0ED;
+  text-decoration-color: #16B0ED;
+}

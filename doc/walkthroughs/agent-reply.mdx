@@ -1,0 +1,107 @@
+---
+title: "From Claude Code to your handlers"
+sidebarTitle: "An agent's reply"
+description: "Follow one Claude Code reply through Agent SDK over ACP: a permission request, a command the agent runs, and what done and the history hold."
+keywords: ["walkthrough", "claude code", "acp", "agent", "permission"]
+---
+
+This page follows one prompt on Claude Code. The agent thinks, asks to run a command, runs it once your plugin allows it, and answers. Your plugin's code is the same as for an [HTTP reply](/walkthroughs/http-reply), plus a permission policy:
+
+```lua
+on = {
+  request = {
+    permission = function(request)
+      local allowed = request.tool_call.kind == "read" or request.tool_call.kind == "search"
+      for _, option in ipairs(request.options) do
+        if option.kind == (allowed and "allow_once" or "reject_once") then
+          return request.respond(option.id)
+        end
+      end
+      request.respond(nil)
+    end,
+  },
+  tool_update = function(update)
+    set_status(update.id, update.status)
+  end,
+}
+```
+
+`set_status` is your plugin's own function, showing a tool's progress.
+
+## What your handlers receive
+
+```lua
+on.reasoning({ type = "reasoning", text = "I should run the tests." })
+on.request.tool_call({
+  type = "tool_call",
+  id = "toolu_02B",
+  title = "make test",
+  kind = "execute",
+  status = "pending",
+  arguments = { command = "make test" },
+  meta = { claudeCode = { toolName = "Bash" } },
+  needs_result = false,
+})
+on.request.permission({
+  type = "permission_request",
+  tool_call = { id = "toolu_02B", title = "make test", kind = "execute" },
+  options = {
+    { id = "allow", name = "Allow", kind = "allow_once" },
+    { id = "reject", name = "Reject", kind = "reject_once" },
+  },
+  respond = function(option_id) end,
+})
+
+-- the plugin calls request.respond("allow"), and the agent runs the command
+on.tool_update({ type = "tool_update", id = "toolu_02B", status = "completed", output = { output = "117 passed" } })
+on.text({ type = "text", text = "All 117 tests pass." })
+on.usage({ type = "usage", input_tokens = 1800, output_tokens = 60, cache_read_input_tokens = 9000 })
+
+on.done(reply)
+```
+
+- A tool call has no `name`, as ACP has none. `title` and `kind` describe it, and `meta` holds the agent's own extras
+- `needs_result` is `false`, as the agent runs its own tools
+- `tool_update` carries only the fields the agent sent. `output` is whatever the agent reports, so its shape varies by tool
+- `usage` arrives once, when the agent finishes
+
+## What `done` receives
+
+```lua
+reply = {
+  text = "All 117 tests pass.",
+  reasoning = "I should run the tests.",
+  tool_calls = {
+    {
+      id = "toolu_02B",
+      title = "make test",
+      kind = "execute",
+      status = "completed",
+      arguments = { command = "make test" },
+      output = { output = "117 passed" },
+      meta = { claudeCode = { toolName = "Bash" } },
+    },
+  },
+  usage = { input_tokens = 1800, output_tokens = 60, cache_read_input_tokens = 9000 },
+}
+```
+
+## What the history holds
+
+The agent keeps its own history, so `session.messages` is only a record of what the SDK saw. It's never sent back.
+
+```lua
+session.messages = {
+  { role = "user", content = "Do the tests pass?" },
+  {
+    role = "llm",
+    content = "All 117 tests pass.",
+    reasoning = { content = "I should run the tests." },
+    tools = {
+      calls = {
+        { id = "toolu_02B", type = "function", ["function"] = { arguments = '{"command":"make test"}' } },
+      },
+    },
+  },
+}
+```

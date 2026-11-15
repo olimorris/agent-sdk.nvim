@@ -1,0 +1,71 @@
+---
+title: "Integrate Agent SDK into an existing plugin"
+sidebarTitle: "Integration checklist"
+description: "A step-by-step checklist for moving an existing Neovim plugin onto Agent SDK, written so you can hand it to your coding agent."
+keywords: ["integrate", "migrate", "checklist", "coding agent", "plugin"]
+---
+
+This checklist moves an existing plugin onto Agent SDK, one step at a time. Each step ends with a "done when" check. It's written so you can hand the page to your coding agent.
+
+Use only the API in the [reference](/reference/api). When the plugin needs something the reference doesn't cover, stop and say what's missing, rather than reaching into the SDK's internals.
+
+<Steps>
+  <Step title="Map the conversations">
+    A **conversation** is one session's worth of back-and-forth with a model: what starts it, where the reply is shown, what the user can do next, and what ends it. One float answering questions about a hunk is a conversation. A one-shot pass that parses a reply into data is another.
+
+    Read the plugin and list every feature that talks, or will talk, to a model. For each, write down its conversation:
+
+    - What starts it
+    - Where the reply goes, and whether it streams or must arrive whole (because the plugin parses it)
+    - Whether the user can ask a follow-up, or stop a reply
+    - What ends it
+
+    **Done when** every feature that talks to a model maps to a conversation with all four answered.
+  </Step>
+  <Step title="Add the user's config">
+    Add one `adapter` option to the plugin's setup. It takes the adapter's name as a string, or a table with a name and a model:
+
+    ```lua
+    require("your_plugin").setup({ adapter = "claude" })
+    require("your_plugin").setup({ adapter = { name = "claude", model = "claude-opus-5" } })
+    ```
+
+    The name is the one the user gave the adapter in `agent_sdk.setup()`. If conversations need different adapters, give each its own option with the same shape. In the plugin's README, show the user both forms and link to [Configure adapters](/configure/adapters).
+
+    **Done when** setup accepts both forms, and the plugin's config holds nothing about credentials or providers.
+  </Step>
+  <Step title="Start each conversation">
+    When a conversation starts:
+
+    1. Resolve the adapter with `sdk.adapter(name)`. If it returns `nil, err`, show `err` with `vim.notify` at `ERROR` and stop
+    2. If the user set a model, check it with `adapter:has_model(model)` and warn if it returns `false`
+    3. Turn off features the adapter can't support, using `adapter.capabilities`
+    4. Start a session with `sdk.session()`, with the session's handlers in `on`
+
+    Every session needs `text`, `done` and `error` handlers. The `error` handler skips events where `event.cancelled` is `true`. Every session also needs a [permission policy](/build/permissions), as any adapter the user picks can be an ACP agent.
+
+    **Done when** every conversation from step 1 starts this way, and every session has `text`, `done`, `error` and `request.permission` handlers.
+  </Step>
+  <Step title="Prompt">
+    - Send prompts with `session:prompt()`, or `session:ask()` inside a `vim.async` task when the code reads better top to bottom
+    - Use `stream = false` for conversations that parse the reply
+    - Keep the task `session:prompt()` returns, and close it from the conversation's stop action
+    - Send one prompt at a time per session. Disable the plugin's "send" action until `done` or `error` arrives
+
+    **Done when** every conversation from step 1 sends its prompts this way, and every one the user can stop is wired to close the task.
+  </Step>
+  <Step title="Close each conversation">
+    Call `session:close()` wherever a conversation ends: its window closes, its command finishes, or the plugin tears down.
+
+    **Done when** every `sdk.session()` call has a matching `session:close()` on every path that ends the conversation.
+  </Step>
+  <Step title="Test">
+    Write tests with the [test adapter](/build/testing), added through `agent_sdk.setup()` as a user would. For each conversation, cover:
+
+    - A reply that streams and ends in `done`
+    - A reply that ends in `error`
+    - For each permission policy, one permission request the policy allows and one it rejects, checked through `scripted.responses`
+
+    **Done when** the tests pass with no network access and no API keys set.
+  </Step>
+</Steps>

@@ -1,0 +1,36 @@
+---
+title: "Handle failed and stopped prompts"
+sidebarTitle: "Failed prompts"
+description: "How Agent SDK reports a failed or stopped prompt, why it adds nothing to the history, and how to resend the prompt or return it to the user."
+keywords: ["error", "cancelled", "retry", "failed prompt"]
+---
+
+A prompt that errors or is stopped adds nothing to the history, not even the prompt itself. The `error` event carries the prompt, so your plugin can send it again or hand it back to the user.
+
+```lua
+on = {
+  error = function(event)
+    if event.cancelled then
+      return restore_input(event.prompt)
+    end
+    vim.notify(event.message, vim.log.levels.ERROR)
+    last_failed_prompt = event.prompt
+  end,
+}
+
+session:prompt(last_failed_prompt)
+```
+
+`restore_input` is your plugin's own function, putting the prompt back in its input buffer.
+
+## The error event
+
+| Field | |
+| --- | --- |
+| `event.message` | What went wrong |
+| `event.cancelled` | `true` when your plugin stopped the reply |
+| `event.prompt` | What was passed to `session:prompt()` |
+
+## When an agent's process exits
+
+If an ACP agent's process exits, its history goes with it. The prompt in progress ends in an `error`, and so does every later prompt in that session. Start a new session to carry on.

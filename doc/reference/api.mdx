@@ -1,0 +1,124 @@
+---
+title: "Agent SDK Lua API reference"
+sidebarTitle: "API"
+description: "Every public function, field, event and request in Agent SDK: setup, adapter, session, prompt, ask, close, handlers and the rules they follow."
+keywords: ["api", "reference", "setup", "adapter", "session", "events", "requests"]
+---
+
+The full public API of Agent SDK. Plugins use only what's on this page.
+
+```lua
+local sdk = require("agent_sdk")
+```
+
+## Setup
+
+`sdk.setup({ adapters = { ... } })` registers the user's adapters. Plugins don't call it, except in tests. See [Configure adapters](/configure/adapters).
+
+`require("agent_sdk.adapters").extend(name, overrides)` copies a built-in adapter and overrides any part of it.
+
+## Adapters
+
+`sdk.adapter(name)` returns the user's adapter, or `nil, err` with an error the plugin can show the user.
+
+| Field | |
+| --- | --- |
+| `adapter.name` | The user's name for it |
+| `adapter.type` | `"http"` or `"acp"` |
+| `adapter.capabilities` | Read-only. `tools`, `vision`, `reasoning` (booleans) and `models` (a list) |
+| `adapter:has_model(model)` | `false` only when the adapter knows its models and `model` isn't one of them |
+
+`capabilities.models` is empty until the SDK knows the models. For an ACP agent, that's once a session has started. `has_model()` never returns `false` for a model it can't check yet, so a plugin never warns the user wrongly.
+
+## Sessions
+
+```lua
+local session = sdk.session({
+  adapter = adapter, -- from sdk.adapter()
+  model = "claude-opus-5", -- optional, nil keeps the user's default
+  system_prompt = "...", -- optional
+  on = { ... }, -- handlers for every prompt in the session
+})
+```
+
+`sdk.session()` returns straight away. Nothing is sent until the first prompt.
+
+| Call | |
+| --- | --- |
+| `session:prompt(content, opts)` | Sends a prompt and returns a `vim.async` task. Closing the task stops the reply |
+| `session:ask(content, opts)` | The same, inside a `vim.async` task. Returns `reply, err` |
+| `session:close()` | Stops any reply in progress and ends the session. For ACP, stops the agent's process |
+| `session.messages` | The history, read-only. On ACP, a record of what the SDK saw |
+| `session:set_messages(messages)` | Replaces the history and returns `true`. On ACP, changes nothing and returns `false, err` |
+
+`content` is a string, or a list of blocks like `{ type = "text", text = "..." }`.
+
+`opts`:
+
+- `stream`: `false` delivers every event in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Defaults to `true`
+- `on`: handlers for this prompt only. Each replaces the session's handler for the same event or request
+
+## Events
+
+Events tell the plugin something and ask nothing of it.
+
+| Handler | Payload |
+| --- | --- |
+| `on.text` | `event.text`, a piece of the answer |
+| `on.reasoning` | `event.text`, a piece of the reasoning |
+| `on.usage` | Token counts |
+| `on.tool_update` | `update.id`, `update.status` (`pending`, `in_progress`, `completed`, `failed`), `update.output`. On ACP, also `title`, `kind`, `content`, `locations`, `arguments` and `meta`. On HTTP, sent when the plugin answers the call |
+| `on.done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
+| `on.error` | `event.message`, `event.cancelled`, `event.prompt` |
+
+## Requests
+
+Requests ask the plugin for something. The reply waits until the handler answers.
+
+| Handler | Payload |
+| --- | --- |
+| `on.request.tool_call` | `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.name` is `nil` as ACP has no tool names: use `call.title`, `call.kind`, `call.status`, and `call.meta` for the agent's own extras |
+| `on.request.permission` | `request.tool_call`, `request.options` (each with `id`, `name`, `kind`), `request.respond(option_id)` |
+
+```lua
+on = {
+  text = function(event) end,
+  done = function(reply) end,
+  error = function(event) end,
+  request = {
+    tool_call = function(call) end,
+    permission = function(request) end,
+  },
+}
+```
+
+`tool_call.kind` and `option.kind` use ACP's values: tool kinds `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `other`; option kinds `allow_once`, `allow_always`, `reject_once`, `reject_always`.
+
+## Rules
+
+- Handlers run on the main loop, so they can write to buffers and windows directly
+- Every prompt ends with exactly one `done` or one `error`
+- Stopping a reply ends the prompt with an `error` whose `cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
+- A prompt that ends in `error` adds nothing to the history, not even the prompt itself. `event.prompt` holds what was passed to `session:prompt()`, so the plugin can send it again or return it to the user
+- Calling `session:prompt()` or `session:ask()` while a reply is in progress raises an error
+- An `on.request.permission` handler must call `request.respond()`. The agent waits until it does. `request.respond(nil)` cancels
+- Without an `on.request.permission` handler, the SDK picks the agent's reject option, or cancels the request when the agent offers none
+- An `on.request.tool_call` handler must call `call.respond()` or `call.fail()` when `call.needs_result` is `true`. The prompt carries on once every call is answered, and ends in one `done`. Without one, the SDK fails every call
+- The SDK closes every open session on `VimLeavePre`
+
+## Test adapter
+
+```lua
+local scripted = require("agent_sdk.test").adapter({
+  type = "acp", -- optional, defaults to "http"
+  replies = {
+    -- one list of events per request, each ending in done or error
+    {
+      { type = "text", text = "Hello" },
+      { type = "done" },
+    },
+  },
+})
+```
+
+`scripted.responses` lists the option ids the plugin's permission handlers responded with, in order. See [Testing](/build/testing).
