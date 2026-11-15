@@ -1,7 +1,7 @@
 <!-- panvimdoc-ignore-start -->
 
 <p align="center">
-<img src="https://github.com/user-attachments/assets/f377cffb-0d54-4b60-81cc-4726bdb3b30c" alt="Agent-SDK.nvim" />
+<img width="1280" height="540" alt="AgentSDK.nvim" src="https://github.com/user-attachments/assets/ef180ff0-13ab-428c-bef1-116ce56de999" />
 </p>
 
 <!-- panvimdoc-ignore-end -->
