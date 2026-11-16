@@ -10,14 +10,14 @@ An ACP agent reads files, writes files and runs commands itself. Before it does,
 ```lua
 on = {
   request = {
-    permission = function(request)
-      local allowed = request.tool_call.kind == "read" or request.tool_call.kind == "search"
-      for _, option in ipairs(request.options) do
+    permission = function(data)
+      local allowed = data.tool_call.kind == "read" or data.tool_call.kind == "search"
+      for _, option in ipairs(data.options) do
         if option.kind == (allowed and "allow_once" or "reject_once") then
-          return request.respond(option.id)
+          return data.respond(option.id)
         end
       end
-      request.respond(nil)
+      data.respond(nil)
     end,
   },
 }
@@ -29,9 +29,9 @@ Work out the policy from the conversation's purpose. A reviewer reads and search
 
 | Field | |
 | --- | --- |
-| `request.tool_call` | The tool call the agent wants to make, with `id`, `title` and `kind` |
-| `request.options` | The answers the agent offers, each with `id`, `name` and `kind` |
-| `request.respond(option_id)` | Answers with one option's `id`. `request.respond(nil)` cancels |
+| `data.tool_call` | The tool call the agent wants to make, with `id`, `title` and `kind` |
+| `data.options` | The answers the agent offers, each with `id`, `name` and `kind` |
+| `data.respond(option_id)` | Answers with one option's `id`. `data.respond(nil)` cancels |
 
 Tool kinds are ACP's: `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch` and `other`.
 
@@ -39,7 +39,7 @@ Option kinds are `allow_once`, `allow_always`, `reject_once` and `reject_always`
 
 ## Rules
 
-- Every path through the handler calls `request.respond()`. The agent waits until it does, so a handler that never responds leaves the reply hanging
+- Every path through the handler calls `data.respond()`. The agent waits until it does, so a handler that never responds leaves the reply hanging
 - Without a permission handler, the SDK picks the agent's reject option, or cancels the request when the agent offers none
 
 ## Asking the user
@@ -47,14 +47,14 @@ Option kinds are `allow_once`, `allow_always`, `reject_once` and `reject_always`
 The handler doesn't have to answer straight away. It can ask the user and respond later:
 
 ```lua
-permission = function(request)
-  vim.ui.select(request.options, {
-    prompt = request.tool_call.title,
+permission = function(data)
+  vim.ui.select(data.options, {
+    prompt = data.tool_call.title,
     format_item = function(option)
       return option.name
     end,
   }, function(option)
-    request.respond(option and option.id)
+    data.respond(option and option.id)
   end)
 end
 ```

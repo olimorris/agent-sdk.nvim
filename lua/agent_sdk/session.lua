@@ -12,13 +12,13 @@ local M = {}
 ---@field close fun(self: agent_sdk.Connection)
 
 ---@class agent_sdk.Handlers
----@field text fun(event: table)?
----@field reasoning fun(event: table)?
----@field usage fun(event: table)?
----@field tool_update fun(update: table)?
----@field done fun(reply: agent_sdk.Reply)?
----@field error fun(event: table)?
----@field request { tool_call: fun(call: table)?, permission: fun(request: table)? }?
+---@field text fun(data: table)?
+---@field reasoning fun(data: table)?
+---@field usage fun(data: table)?
+---@field tool_update fun(data: table)?
+---@field done fun(data: agent_sdk.Reply)?
+---@field error fun(data: table)?
+---@field request { tool_call: fun(data: table)?, permission: fun(data: table)? }?
 
 ---@class agent_sdk.SessionOpts
 ---@field adapter agent_sdk.Adapter

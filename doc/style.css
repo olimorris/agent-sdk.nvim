@@ -9,3 +9,7 @@
   border-bottom-color: #16B0ED;
   text-decoration-color: #16B0ED;
 }
+
+#content-area table td:first-child code {
+  white-space: nowrap;
+}

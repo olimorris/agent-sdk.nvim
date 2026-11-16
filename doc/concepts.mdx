@@ -14,11 +14,13 @@ An adapter is how the SDK talks to one provider. There are two kinds:
 - **HTTP adapters** send requests to a model's API, like Anthropic's. The model only answers. It can't touch your files
 - **ACP adapters** start an agent, like Claude Code, as a separate process and talk to it over the [Agent Client Protocol](https://agentclientprotocol.com). An agent reads files, writes files and runs commands itself
 
+Your plugin uses both the same way. See [Transports](/transports) for why there are two, and the few places they differ.
+
 Your users set up their adapters, and the credentials each one needs, in `agent_sdk.setup()`. Your plugin asks for one by name. See [Configure adapters](/configure/adapters).
 
 ## Sessions
 
-A session is one conversation. It holds the adapter, your handlers and the history, so each prompt carries on from the last. A chat window is one session. Closing the window should close the session. See [Sessions](/build/sessions).
+A session is one conversation. It holds the adapter, your handlers and the history, so each prompt carries on from the last. A chat window is one session. Closing the window should close the session. See [Sessions](/reference/sessions).
 
 ## Prompts and replies
 
@@ -39,17 +41,14 @@ A tool call is the model asking to do something it can't do by itself, like read
 - **HTTP:** your plugin runs the tool and sends the result back, and the model carries on with its answer
 - **ACP:** the agent runs its own tools, and your plugin follows along
 
-See [Tool calls](/build/tool-calls).
+See [Tool calls](/reference/tool-calls).
 
 ## Permissions
 
-Before an agent changes anything, like writing a file or running a command, it asks your plugin for permission. Your plugin allows or rejects each request, or asks the user. Without a permission handler, the SDK rejects every request. See [Permissions](/build/permissions).
+Before an agent changes anything, like writing a file or running a command, it asks your plugin for permission. Your plugin allows or rejects each request, or asks the user. Without a permission handler, the SDK rejects every request. See [Permissions](/reference/permissions).
 
-## Events and requests
+## Handlers
 
-Your plugin hears about all of this through handlers in two groups:
+Your plugin hears about all of this through handlers, functions you give the session. Each one receives a table, `data`. Most only tell your plugin something: `text`, `reasoning`, `usage`, `tool_update`, `done` and `error`. The two under `request`, `tool_call` and `permission`, ask your plugin for something, and the reply waits until you answer.
 
-- **Events** tell your plugin something and need nothing back: `text`, `reasoning`, `usage`, `tool_update`, `done` and `error`
-- **Requests** ask your plugin for something, and the reply waits until you answer: `tool_call` and `permission`
-
-Every handler is listed in the [API reference](/reference/api#events).
+Every handler is listed in the [API reference](/reference/api#handlers).

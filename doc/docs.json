@@ -34,6 +34,7 @@
         "pages": [
           "index",
           "concepts",
+          "transports",
           "installation"
         ]
       },
@@ -49,6 +50,7 @@
         "group": "Build a plugin",
         "pages": [
           "build/quickstart",
+          "build/testing",
           "build/integrating"
         ]
       },
@@ -56,22 +58,49 @@
         "group": "Walkthroughs",
         "pages": [
           "walkthroughs/chat-plugin",
-          "walkthroughs/http-reply",
-          "walkthroughs/agent-reply"
+          "walkthroughs/reply"
         ]
       },
       {
         "group": "Reference",
         "pages": [
           "reference/api",
-          "build/sessions",
-          "build/tool-calls",
-          "build/permissions",
-          "build/errors",
-          "build/testing",
-          "reference/http-and-acp"
+          "reference/sessions",
+          "reference/tool-calls",
+          "reference/permissions",
+          "reference/test-adapter"
         ]
       }
     ]
-  }
+  },
+  "redirects": [
+    {
+      "source": "/build/errors",
+      "destination": "/reference/sessions#failed-prompts"
+    },
+    {
+      "source": "/build/sessions",
+      "destination": "/reference/sessions"
+    },
+    {
+      "source": "/build/tool-calls",
+      "destination": "/reference/tool-calls"
+    },
+    {
+      "source": "/build/permissions",
+      "destination": "/reference/permissions"
+    },
+    {
+      "source": "/reference/http-and-acp",
+      "destination": "/transports"
+    },
+    {
+      "source": "/walkthroughs/http-reply",
+      "destination": "/walkthroughs/reply"
+    },
+    {
+      "source": "/walkthroughs/agent-reply",
+      "destination": "/walkthroughs/reply"
+    }
+  ]
 }

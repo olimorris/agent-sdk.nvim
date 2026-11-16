@@ -10,15 +10,15 @@ A tool call is the model asking your plugin for something, so it arrives in `on.
 ```lua
 on = {
   request = {
-    tool_call = function(call)
-      if call.name ~= "read_file" then
-        return call.fail("Unknown tool: " .. tostring(call.name))
+    tool_call = function(data)
+      if data.name ~= "read_file" then
+        return data.fail("Unknown tool: " .. tostring(data.name))
       end
-      local text, err = read_file(call.arguments.path)
+      local text, err = read_file(data.arguments.path)
       if text then
-        call.respond(text)
+        data.respond(text)
       else
-        call.fail(err)
+        data.fail(err)
       end
     end,
   },
@@ -28,12 +28,12 @@ on = {
 `read_file` is your plugin's own function, returning a file's text including unsaved changes.
 
 <Note>
-The API for giving an HTTP model your plugin's tool definitions isn't built yet. Until it is, only the [test adapter](/build/testing) produces tool calls on HTTP.
+The API for giving an HTTP model your plugin's tool definitions isn't built yet. Until it is, only the [test adapter](/reference/test-adapter) produces tool calls on HTTP.
 </Note>
 
 ## Answering a call
 
-When `call.needs_result` is `true`, your handler must call `call.respond(content)` or `call.fail(message)`. Once every call in a reply is answered, the SDK sends the results and the prompt carries on. Your plugin sees one `done`, with the whole answer.
+When `data.needs_result` is `true`, your handler must call `data.respond(content)` or `data.fail(message)`. Once every call in a reply is answered, the SDK sends the results and the prompt carries on. Your plugin sees one `done`, with the whole answer.
 
 A handler that never answers leaves the reply hanging. Without a `tool_call` handler, the SDK fails every call.
 
@@ -43,8 +43,8 @@ A handler that never answers leaves the reply hanging. Without a `tool_call` han
 
 ```lua
 on = {
-  tool_update = function(update)
-    set_status(update.id, update.status)
+  tool_update = function(data)
+    set_status(data.id, data.status)
   end,
 }
 ```
@@ -55,10 +55,10 @@ On HTTP, the SDK sends `tool_update` once your plugin answers. For a reply that 
 
 The same handler runs, but the agent runs its own tools:
 
-- `call.needs_result` is `false`, and `call.respond()` and `call.fail()` do nothing
-- `call.name` is `nil`, as ACP has no tool names. Use `call.title` and `call.kind`, and `call.meta` for the agent's own extras
+- `data.needs_result` is `false`, and `data.respond()` and `data.fail()` do nothing
+- `data.name` is `nil`, as ACP has no tool names. Use `data.title` and `data.kind`, and `data.meta` for the agent's own extras
 - The agent asks before running a tool. Your plugin answers in a [permission handler](/build/permissions)
 
 ## In the reply and history
 
-`reply.tool_calls` lists every tool call in the prompt, with the latest `status` and `output`. The history pairs every call with its result. See the [walkthrough](/walkthroughs/http-reply) for the full sequence.
+In `done`, `data.tool_calls` lists every tool call in the prompt, with the latest `status` and `output`. The history pairs every call with its result. See the [walkthrough](/walkthroughs/reply) for the full sequence.

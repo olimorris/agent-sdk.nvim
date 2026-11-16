@@ -74,8 +74,8 @@ Every adapter is used through a session and `session:prompt()`.
 - `system_prompt` is added to the agent's own instructions. On HTTP, it is the whole system prompt
 - An agent is never told the editor can read files, write files or run terminals. `on.request.read_file` and `on.request.write_file` are reserved for when that changes, and aren't built
 - Permission requests with no plugin handler are rejected
-- `on.request.permission` gives the plugin `request.tool_call`, `request.options` and `request.respond(option_id)`. Option fields are snake_case (`option.id`, not ACP's `optionId`). `request.respond(nil)` cancels
-- The agent waits until the handler calls `request.respond()`. A handler that never responds leaves the reply hanging, and the docs say so
+- `on.request.permission` gives the plugin `request.tool_call`, `data.options` and `data.respond(option_id)`. Option fields are snake_case (`option.id`, not ACP's `optionId`). `data.respond(nil)` cancels
+- The agent waits until the handler calls `data.respond()`. A handler that never responds leaves the reply hanging, and the docs say so
 
 ## Events
 
@@ -100,18 +100,18 @@ Every adapter supports `stream = false`. The plugin gets the same events in one 
 
 Tool calls are passed straight through to the plugin's `on.request.tool_call` handler.
 
-- A prompt isn't done while a tool call is unanswered. The plugin answers on the event with `call.respond(content)` or `call.fail(message)`
+- A prompt isn't done while a tool call is unanswered. The plugin answers on the event with `data.respond(content)` or `data.fail(message)`
 - When every call in a reply is answered, the SDK sends the results and the same prompt carries on. The plugin sees one `done`, with the whole answer, as it does on ACP
 - The SDK pairs the ids, so the history never holds a tool call without its result
 - A request handler that never answers leaves the reply hanging. With no `tool_call` handler, the SDK fails the call. With no `permission` handler, it rejects the request
-- On ACP the agent runs the tool itself, so `call.respond` and `call.fail` do nothing
+- On ACP the agent runs the tool itself, so `data.respond` and `data.fail` do nothing
 
-- Every handler receives an event table (`event.text`, `event.message`), so every event has the same shape
+- Every handler receives one table, `data` (`data.text`, `data.message`), so every handler has the same shape
 - Handlers run on the main loop, so they can write to buffers and windows directly
 - Every prompt ends with exactly one `done` or one `error`
 - `done` receives the whole reply: `reply.text`, `reply.reasoning` and `reply.usage`. `done` always means a reply was added to the history
-- Stopping a reply ends the prompt with an `error` whose `event.cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
-- A prompt that ends in `error` adds nothing to the history, not even the prompt itself. The `error` event carries it as `event.prompt`, so the plugin can send it again or return it to the user
+- Stopping a reply ends the prompt with an `error` whose `data.cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
+- A prompt that ends in `error` adds nothing to the history, not even the prompt itself. The `error` event carries it as `data.prompt`, so the plugin can send it again or return it to the user
 - Tool calls carry `needs_result`. It is `true` on HTTP, where the plugin owes a result, and `false` on ACP, where the agent runs the tool itself
 - `reply.tool_calls` lists every tool call in the prompt, and `reply.usage` adds up every request the prompt made
 

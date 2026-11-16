@@ -1,0 +1,177 @@
+---
+title: "Follow one reply to your handlers"
+sidebarTitle: "A reply"
+description: "Follow one prompt through Agent SDK: the reasoning and answer as they stream, a tool call, what done receives and what the history holds."
+keywords: ["walkthrough", "reply", "handlers", "tool call", "history"]
+---
+
+This page follows one prompt from your plugin to the reply. The model thinks, starts its answer, reads a file, then finishes the answer. The handlers run the same way whichever adapter the user picked. Where the [transport](/transports) changes what's inside a call, the page says so.
+
+## Your plugin's handlers
+
+```lua
+local session = sdk.session({
+  adapter = adapter,
+  on = {
+    reasoning = function(data)
+      append(reasoning_buf, data.text)
+    end,
+    text = function(data)
+      append(answer_buf, data.text)
+    end,
+    tool_update = function(data)
+      set_status(data.id, data.status)
+    end,
+    done = function(data)
+      vim.bo[answer_buf].modifiable = false
+    end,
+    error = function(data)
+      vim.notify(data.message, vim.log.levels.ERROR)
+    end,
+    request = {
+      tool_call = function(data)
+        if data.needs_result then
+          data.respond(read_file(data.arguments.path))
+        end
+      end,
+      permission = function(data)
+        local allowed = data.tool_call.kind == "read"
+        for _, option in ipairs(data.options) do
+          if option.kind == (allowed and "allow_once" or "reject_once") then
+            return data.respond(option.id)
+          end
+        end
+        data.respond(nil)
+      end,
+    },
+  },
+})
+
+session:prompt("Why was the nil check moved?")
+```
+
+`append`, `set_status` and `read_file` are your plugin's own functions.
+
+## What your handlers receive
+
+In order, with the `data` each handler is called with.
+
+<Steps>
+  <Step title="The reasoning streams in">
+    ```lua
+    on.reasoning({ type = "reasoning", text = "The nil check moved " })
+    on.reasoning({ type = "reasoning", text = "above the loop, so..." })
+    ```
+
+    Not every model reasons. When one doesn't, this handler never runs.
+  </Step>
+  <Step title="The answer starts">
+    ```lua
+    on.text({ type = "text", text = "I'll read the file " })
+    on.text({ type = "text", text = "to check." })
+    ```
+
+    `reasoning` and `text` arrive in pieces as they stream. With `stream = false`, they arrive once each, with the whole text.
+  </Step>
+  <Step title="The model wants to read a file">
+    ```lua
+    on.request.tool_call({
+      type = "tool_call",
+      id = "toolu_01A",
+      name = "read_file",
+      arguments = { path = "lua/foo.lua" },
+      needs_result = true,
+      respond = function(content) end,
+      fail = function(message) end,
+    })
+    ```
+
+    The reply waits here until the call is answered.
+
+    - **HTTP model:** `needs_result` is `true`, so your plugin runs the tool and calls `data.respond()`
+    - **Agent:** `needs_result` is `false`, as the agent runs the tool itself. There's no `name`, so use `data.title` and `data.kind`. The agent then asks permission:
+
+    ```lua
+    on.request.permission({
+      type = "permission_request",
+      tool_call = { id = "toolu_01A", title = "Read lua/foo.lua", kind = "read" },
+      options = {
+        { id = "allow", name = "Allow", kind = "allow_once" },
+        { id = "reject", name = "Reject", kind = "reject_once" },
+      },
+      respond = function(option_id) end,
+    })
+    ```
+
+    Your handlers above cover both, so the plugin works whichever adapter the user picked.
+  </Step>
+  <Step title="The tool finishes">
+    ```lua
+    on.tool_update({ type = "tool_update", id = "toolu_01A", status = "completed", output = "local M = {}\n..." })
+    ```
+
+    On an agent, `output` is whatever the agent reports, so its shape varies by tool.
+  </Step>
+  <Step title="The answer finishes">
+    ```lua
+    on.text({ type = "text", text = "It moved because..." })
+    on.usage({ type = "usage", input_tokens = 2600, output_tokens = 125 })
+    on.done(data)
+    ```
+
+    `usage` arrives with the final token counts. Every prompt ends in exactly one `done` or one `error`.
+  </Step>
+</Steps>
+
+## What `done` receives
+
+The whole reply:
+
+```lua
+data = {
+  text = "I'll read the file to check.It moved because...",
+  reasoning = "The nil check moved above the loop, so...",
+  tool_calls = {
+    {
+      id = "toolu_01A",
+      name = "read_file",
+      arguments = { path = "lua/foo.lua" },
+      status = "completed",
+      output = "local M = {}\n...",
+    },
+  },
+  usage = { input_tokens = 2600, output_tokens = 125 },
+}
+```
+
+- `text` and `reasoning` join every piece exactly as received
+- `tool_calls` carry the latest `status` and `output` from `tool_update`
+- `usage` adds up every request the prompt made
+
+## What the history holds
+
+Every step, with each tool call paired to its result:
+
+```lua
+session.messages = {
+  { role = "user", content = "Why was the nil check moved?" },
+  {
+    role = "llm",
+    content = "I'll read the file to check.",
+    reasoning = { content = "The nil check moved above the loop, so..." },
+    tools = {
+      calls = {
+        {
+          id = "toolu_01A",
+          type = "function",
+          ["function"] = { name = "read_file", arguments = '{"path":"lua/foo.lua"}' },
+        },
+      },
+    },
+  },
+  { role = "tool", content = "local M = {}\n...", tools = { call_id = "toolu_01A" } },
+  { role = "llm", content = "It moved because..." },
+}
+```
+
+It uses [CodeCompanion's](https://github.com/olimorris/codecompanion.nvim) message format, whatever the adapter. On an HTTP model, the SDK sends it back on every request. An agent keeps its own history, so there `session.messages` is only a record of what the SDK saw. It holds the agent's tool calls, but not their results.

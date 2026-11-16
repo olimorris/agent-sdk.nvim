@@ -1,8 +1,8 @@
 ---
 title: "Agent SDK Lua API reference"
 sidebarTitle: "API"
-description: "Every public function, field, event and request in Agent SDK: setup, adapter, session, prompt, ask, close, handlers and the rules they follow."
-keywords: ["api", "reference", "setup", "adapter", "session", "events", "requests"]
+description: "Every public function, field and handler in Agent SDK: setup, adapter, session, prompt, ask, close, handlers and the rules they follow."
+keywords: ["api", "reference", "setup", "adapter", "session", "handlers", "data"]
 ---
 
 The full public API of Agent SDK. Plugins use only what's on this page.
@@ -55,55 +55,130 @@ local session = sdk.session({
 
 `opts`:
 
-- `stream`: `false` delivers every event in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Defaults to `true`
-- `on`: handlers for this prompt only. Each replaces the session's handler for the same event or request
+- `stream`: `false` runs every handler in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Defaults to `true`
+- `on`: [handlers](#handlers) for this prompt only. Each replaces the session's handler of the same name
 
-## Events
+## Handlers
 
-Events tell the plugin something and ask nothing of it. New to these ideas? See [Core concepts](/concepts).
-
-| Handler | Payload |
-| --- | --- |
-| `on.text` | `event.text`, a piece of the answer as it [streams](/concepts#streaming) |
-| `on.reasoning` | `event.text`, a piece of the model's [reasoning](/concepts#reasoning) |
-| `on.usage` | Token counts |
-| `on.tool_update` | `update.id`, `update.status` (`pending`, `in_progress`, `completed`, `failed`), `update.output`. On ACP, also `title`, `kind`, `content`, `locations`, `arguments` and `meta`. On HTTP, sent when the plugin answers the call |
-| `on.done` | The reply: `reply.text`, `reply.reasoning`, `reply.tool_calls`, `reply.usage` |
-| `on.error` | `event.message`, `event.cancelled`, `event.prompt` |
-
-## Requests
-
-Requests ask the plugin for something. The reply waits until the handler answers.
-
-| Handler | Payload |
-| --- | --- |
-| `on.request.tool_call` | See [Tool calls](/build/tool-calls). `call.id`, `call.name`, `call.arguments`, `call.needs_result`, `call.respond(content)`, `call.fail(message)`. On ACP, `call.name` is `nil` as ACP has no tool names: use `call.title`, `call.kind`, `call.status`, and `call.meta` for the agent's own extras |
-| `on.request.permission` | See [Permissions](/build/permissions). `request.tool_call`, `request.options` (each with `id`, `name`, `kind`), `request.respond(option_id)` |
+Handlers go in `on`, for every prompt in a session, or in a prompt's `opts.on`, for that prompt only. Every handler receives one table, `data`. New to these ideas? See [Core concepts](/concepts).
 
 ```lua
 on = {
-  text = function(event) end,
-  done = function(reply) end,
-  error = function(event) end,
+  text = function(data) end,
+  reasoning = function(data) end,
+  usage = function(data) end,
+  tool_update = function(data) end,
+  done = function(data) end,
+  error = function(data) end,
   request = {
-    tool_call = function(call) end,
-    permission = function(request) end,
+    tool_call = function(data) end,
+    permission = function(data) end,
   },
 }
 ```
 
-`tool_call.kind` and `option.kind` use ACP's values: tool kinds `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `other`; option kinds `allow_once`, `allow_always`, `reject_once`, `reject_always`.
+The handlers under `on.request` ask your plugin for something, and the reply waits until the handler answers. The rest only tell your plugin something.
+
+### text
+
+A piece of the answer, as it [streams](/concepts#streaming).
+
+| Field | |
+| --- | --- |
+| `data.text` | The piece of text |
+
+### reasoning
+
+A piece of the model's [reasoning](/concepts#reasoning). Not every model or adapter produces it.
+
+| Field | |
+| --- | --- |
+| `data.text` | The piece of reasoning |
+
+### usage
+
+Token counts, once per request.
+
+| Field | |
+| --- | --- |
+| `data.input_tokens` | Tokens sent to the model |
+| `data.output_tokens` | Tokens the model wrote |
+
+### tool_update
+
+The progress of a [tool call](/reference/tool-calls). On HTTP, sent when your plugin answers the call.
+
+| Field | |
+| --- | --- |
+| `data.id` | The tool call's id |
+| `data.status` | `pending`, `in_progress`, `completed` or `failed` |
+| `data.output` | The tool's output |
+
+On ACP, also `title`, `kind`, `content`, `locations`, `arguments` and `meta`.
+
+### done
+
+The whole reply, once it's complete.
+
+| Field | |
+| --- | --- |
+| `data.text` | The answer |
+| `data.reasoning` | The reasoning, if any |
+| `data.tool_calls` | Every tool call in the prompt, with its latest `status` and `output` |
+| `data.usage` | Token counts for the whole prompt |
+
+### error
+
+The prompt failed or was stopped. See [Failed prompts](/reference/sessions#failed-prompts).
+
+| Field | |
+| --- | --- |
+| `data.message` | What went wrong |
+| `data.cancelled` | `true` when your plugin stopped the reply |
+| `data.prompt` | What was passed to `session:prompt()` |
+
+### request.tool_call
+
+The model asks your plugin to run a tool. See [Tool calls](/reference/tool-calls).
+
+| Field | |
+| --- | --- |
+| `data.id` | The call's id |
+| `data.name` | The tool's name. `nil` on ACP, which has no tool names |
+| `data.arguments` | The tool's arguments |
+| `data.needs_result` | `true` when your plugin must answer |
+| `data.respond(content)` | Answers with the tool's result |
+| `data.fail(message)` | Answers with an error |
+
+On ACP, use `data.title` and `data.kind` in place of the name, `data.status`, and `data.meta` for the agent's own extras.
+
+### request.permission
+
+An agent asks before it acts. See [Permissions](/reference/permissions).
+
+| Field | |
+| --- | --- |
+| `data.tool_call` | What the agent wants to do, with `id`, `title` and `kind` |
+| `data.options` | The answers on offer, each with `id`, `name` and `kind` |
+| `data.respond(option_id)` | Answers with one option's `id`. `nil` cancels |
+
+### Kinds
+
+`kind` fields use ACP's values:
+
+- **Tool kinds:** `read`, `edit`, `delete`, `move`, `search`, `execute`, `think`, `fetch`, `other`
+- **Option kinds:** `allow_once`, `allow_always`, `reject_once`, `reject_always`
 
 ## Rules
 
 - Handlers run on the main loop, so they can write to buffers and windows directly
 - Every prompt ends with exactly one `done` or one `error`
 - Stopping a reply ends the prompt with an `error` whose `cancelled` is `true`. On HTTP, nothing from the stopped reply is added to the history
-- A prompt that ends in `error` adds nothing to the history, not even the prompt itself. `event.prompt` holds what was passed to `session:prompt()`, so the plugin can send it again or return it to the user
+- A prompt that ends in `error` adds nothing to the history, not even the prompt itself. `data.prompt` holds what was passed to `session:prompt()`, so the plugin can send it again or return it to the user
 - Calling `session:prompt()` or `session:ask()` while a reply is in progress raises an error
-- An `on.request.permission` handler must call `request.respond()`. The agent waits until it does. `request.respond(nil)` cancels
+- An `on.request.permission` handler must call `data.respond()`. The agent waits until it does. `data.respond(nil)` cancels
 - Without an `on.request.permission` handler, the SDK picks the agent's reject option, or cancels the request when the agent offers none
-- An `on.request.tool_call` handler must call `call.respond()` or `call.fail()` when `call.needs_result` is `true`. The prompt carries on once every call is answered, and ends in one `done`. Without one, the SDK fails every call
+- An `on.request.tool_call` handler must call `data.respond()` or `data.fail()` when `data.needs_result` is `true`. The prompt carries on once every call is answered, and ends in one `done`. Without one, the SDK fails every call
 - The SDK closes every open session on `VimLeavePre`
 
 ## Test adapter
@@ -112,7 +187,7 @@ on = {
 local scripted = require("agent_sdk.test").adapter({
   type = "acp", -- optional, defaults to "http"
   replies = {
-    -- one list of events per request, each ending in done or error
+    -- one list per request, each ending in done or error
     {
       { type = "text", text = "Hello" },
       { type = "done" },
@@ -121,4 +196,4 @@ local scripted = require("agent_sdk.test").adapter({
 })
 ```
 
-`scripted.responses` lists the option ids the plugin's permission handlers responded with, in order. See [Testing](/build/testing).
+`scripted.responses` lists the option ids the plugin's permission handlers responded with, in order. See [Test adapter](/reference/test-adapter).

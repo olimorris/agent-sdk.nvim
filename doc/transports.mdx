@@ -1,0 +1,65 @@
+---
+title: "One API for models and agents"
+sidebarTitle: "Transports"
+description: "How Agent SDK talks to LLMs over HTTP and to agents over ACP, why there are two, and why your plugin's code is the same for both."
+keywords: ["transport", "http", "acp", "agent", "agent client protocol", "differences"]
+---
+
+There are two ways to reach an LLM from Neovim today: send requests to a model's API, or talk to an agent like Claude Code. Agent SDK handles both behind one API, so your plugin doesn't need to know which one the user picked.
+
+## A short history
+
+**HTTP APIs came first.** Your plugin sends the whole conversation to a provider like Anthropic, and the model streams back its reply. The model only answers. If it needs to read a file, it asks your plugin to run a tool and send back the result. Every request carries the full history, so the plugin keeps it.
+
+**Then came agents.** An agent like Claude Code runs as its own process. It keeps its own history, reads and writes files, and runs commands itself. Each editor had its own way to talk to each agent, until the [Agent Client Protocol](https://agentclientprotocol.com) (ACP) gave them one. An editor starts the agent and talks to it over ACP, and the agent asks the editor for permission before it acts.
+
+The two work very differently. An HTTP request is stateless and the plugin does the work. An agent is long-running and does the work itself.
+
+## How Agent SDK handles both
+
+Each adapter uses one of the two transports:
+
+- **HTTP adapters**, like `anthropic`, send requests to a model's API
+- **ACP adapters**, like `claude_code`, start an agent and talk to it over ACP
+
+Your plugin uses both the same way: `sdk.session()`, `session:prompt()` and the same [handlers](/reference/api#handlers), with the same field names. The SDK covers the differences. On HTTP, it keeps the history and sends it on every request. On ACP, it starts the agent's process on the first prompt and passes its permission requests to your plugin.
+
+The user picks the adapter, so write for both. A plugin written against one works on the other.
+
+## Where they still differ
+
+Some differences can't be hidden, because one side can't do what the other does. Where that happens, the call still works and does nothing, rather than raising an error.
+
+| | HTTP | ACP |
+| --- | --- | --- |
+| History | The SDK owns it and sends it on every request | The agent owns it. `session.messages` is a record of what the SDK saw, never sent back |
+| `session:set_messages()` | Replaces the history and returns `true` | Changes nothing and returns `false, err` |
+| `system_prompt` | The whole system prompt | Added to the agent's own instructions |
+| Tool calls | `needs_result = true`. Your plugin runs the tool and answers | `needs_result = false`. The agent runs the tool, and `data.respond()` and `data.fail()` do nothing |
+| `data.name` | The tool's name | `nil`. Use `data.title` and `data.kind` |
+| Files and commands | Only through your plugin's tools | The agent reads, writes and runs commands itself, behind [permission requests](/reference/permissions) |
+| First reply | Sent straight away | Slower, as the SDK starts the agent's process on the first prompt |
+
+### Agents work from disk
+
+An ACP agent reads files, writes files and runs commands itself. It can't do any of these through Neovim, so it doesn't see unsaved changes.
+
+### An agent's process can exit
+
+If an ACP agent's process exits, the agent's history goes with it. The prompt in progress ends in an `error`, and so does every later prompt in that session. Start a new session to carry on.
+
+## Supporting only ACP agents
+
+A plugin that needs an agent, such as one that edits files, can refuse HTTP adapters. Check `adapter.type` once the adapter is resolved:
+
+```lua
+local adapter, err = sdk.adapter(config.adapter)
+if not adapter then
+  return vim.notify(err, vim.log.levels.ERROR)
+end
+if adapter.type ~= "acp" then
+  return vim.notify("your_plugin needs an ACP agent, like claude_code", vim.log.levels.ERROR)
+end
+```
+
+Follow one reply through the SDK in the [reply walkthrough](/walkthroughs/reply).

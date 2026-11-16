@@ -8,3 +8,7 @@
 
 An SDK enabling you to connect Neovim plugins to LLMs and agents via HTTP and [ACP](https://agentclientprotocol.com). Like [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) was for early Neovim plugin devs...
 
+## Adapters
+
+Agent SDK ships one adapter per API format: OpenAI, OpenAI Responses, Anthropic, Gemini and Copilot. Any other provider, like Ollama or OpenRouter, extends one of them, in your config or in its own plugin. Pull requests that add a vendor adapter are declined.
+

@@ -15,6 +15,7 @@ To add one, copy the next number and write a title and a short paragraph. Add "C
 - [0009](0009-streaming-and-non-streaming-share-handlers.md) - Streaming and non-streaming replies use the same handlers
 - [0010](0010-provider-reply-blocks-are-stored-as-received.md) - A provider's reply blocks are stored as received and sent back unchanged (superseded by 0014)
 - [0011](0011-no-file-handlers-or-terminals-for-acp-agents.md) - No file handlers or terminals for ACP agents
-- [0012](0012-adapters-start-from-codecompanion.md) - Adapters start from CodeCompanion's adapter code
+- [0012](0012-adapters-start-from-codecompanion.md) - Adapters start from CodeCompanion's adapter code (second paragraph superseded by 0015)
 - [0013](0013-a-public-test-adapter.md) - The SDK ships a public test adapter
 - [0014](0014-transports-and-adapters-are-ports-of-codecompanion.md) - Transports and adapters are ports of CodeCompanion's code
+- [0015](0015-one-adapter-per-api-format.md) - The SDK ships one adapter per API format, and other providers extend one

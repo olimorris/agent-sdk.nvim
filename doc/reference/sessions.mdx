@@ -24,17 +24,17 @@ Handlers in `on` run for every prompt in the session:
 
 ```lua
 on = {
-  reasoning = function(event)
-    append(reasoning_buf, event.text)
+  reasoning = function(data)
+    append(reasoning_buf, data.text)
   end,
-  text = function(event)
-    append(answer_buf, event.text)
+  text = function(data)
+    append(answer_buf, data.text)
   end,
-  done = function(reply)
+  done = function(data)
     vim.bo[answer_buf].modifiable = false
   end,
-  error = function(event)
-    vim.notify(event.message, vim.log.levels.ERROR)
+  error = function(data)
+    vim.notify(data.message, vim.log.levels.ERROR)
   end,
 }
 ```
@@ -44,7 +44,7 @@ Handlers run on the main loop, so they can write to buffers and windows directly
 `done` receives the whole reply:
 
 ```lua
-reply = {
+data = {
   text = "It moved because...",
   reasoning = "The nil check moved above the loop, so...",
   tool_calls = {},
@@ -52,7 +52,7 @@ reply = {
 }
 ```
 
-See the [API reference](/reference/api#events) for every event.
+See the [API reference](/reference/api#handlers) for every handler.
 
 ## Sending a prompt
 
@@ -72,17 +72,17 @@ Pass `stream = false` when you parse the reply rather than show it as it arrives
 session:prompt("List the changed functions as JSON", { stream = false })
 ```
 
-The same handlers run, with every event in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered.
+The same handlers run, all in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered.
 
 ### Handlers for one prompt
 
-`on` in a prompt's options replaces the session's handler for the same event, for that prompt only:
+`on` in a prompt's options replaces the session's handler of the same name, for that prompt only:
 
 ```lua
 session:prompt("Summarise this hunk", {
   on = {
-    done = function(reply)
-      set_summary(reply.text)
+    done = function(data)
+      set_summary(data.text)
     end,
   },
 })
@@ -100,7 +100,7 @@ vim.keymap.set("n", "q", function()
 end, { buffer = buf })
 ```
 
-Stopping a reply ends the prompt with an `error` whose `event.cancelled` is `true`. Skip those in your `error` handler, as your plugin stopped the reply itself.
+Stopping a reply ends the prompt with an `error` whose `data.cancelled` is `true`. Skip those in your `error` handler, as your plugin stopped the reply itself.
 
 ## Waiting for the reply
 
@@ -118,6 +118,38 @@ end)
 
 The session's handlers still run during `session:ask()`, so a buffer can stream while the task waits. Closing the task stops the reply.
 
+## Failed prompts
+
+A prompt that errors or is stopped adds nothing to the history, not even the prompt itself. The `error` handler's `data` carries the prompt, so your plugin can send it again or hand it back to the user.
+
+```lua
+on = {
+  error = function(data)
+    if data.cancelled then
+      return restore_input(data.prompt)
+    end
+    vim.notify(data.message, vim.log.levels.ERROR)
+    last_failed_prompt = data.prompt
+  end,
+}
+
+session:prompt(last_failed_prompt)
+```
+
+`restore_input` is your plugin's own function, putting the prompt back in its input buffer.
+
+### What `error` receives
+
+| Field | |
+| --- | --- |
+| `data.message` | What went wrong |
+| `data.cancelled` | `true` when your plugin stopped the reply |
+| `data.prompt` | What was passed to `session:prompt()` |
+
+### When an agent's process exits
+
+If an ACP agent's process exits, its history goes with it. The prompt in progress ends in an `error`, and so does every later prompt in that session. Start a new session to carry on.
+
 ## History
 
 `session.messages` holds the conversation, read-only. Replace it with `session:set_messages()`:
@@ -128,7 +160,7 @@ table.remove(messages)
 session:set_messages(messages)
 ```
 
-The history uses [CodeCompanion's](https://github.com/olimorris/codecompanion.nvim) provider-neutral message format, and the SDK converts it for each adapter on every request. A prompt that ends in `error` adds nothing to the history. See [Failed prompts](/build/errors).
+The history uses [CodeCompanion's](https://github.com/olimorris/codecompanion.nvim) provider-neutral message format, and the SDK converts it for each adapter on every request. A prompt that ends in `error` adds nothing to the history. See [Failed prompts](#failed-prompts).
 
 On an ACP agent, the agent keeps its own history. `session.messages` is only a record of what the SDK saw, and `session:set_messages()` changes nothing and returns `false, err`.
 

@@ -115,27 +115,27 @@ Everything goes in one file, `lua/your_plugin.lua`.
     `task` will hold the reply in progress.
   </Step>
   <Step title="Start a session">
-    A [session](/build/sessions) is one conversation. It keeps the history, so each prompt carries on from the last. One chat buffer is one session. Give it the adapter and your handlers, which run for every prompt in the session:
+    A [session](/reference/sessions) is one conversation. It keeps the history, so each prompt carries on from the last. One chat buffer is one session. Give it the adapter and your handlers, which run for every prompt in the session:
 
     ```lua
     local session = sdk.session({
       adapter = adapter,
       on = {
-        reasoning = function(event)
+        reasoning = function(data)
           heading("### Reasoning")
-          append(event.text)
+          append(data.text)
         end,
-        text = function(event)
+        text = function(data)
           heading("### Answer")
-          append(event.text)
+          append(data.text)
         end,
         done = function()
           task = nil
           heading("## You")
         end,
-        error = function(event)
+        error = function(data)
           task = nil
-          heading(event.cancelled and "_Stopped_" or ("**Error:** " .. event.message))
+          heading(data.cancelled and "_Stopped_" or ("**Error:** " .. data.message))
           heading("## You")
         end,
       },
@@ -147,7 +147,7 @@ Everything goes in one file, `lua/your_plugin.lua`.
     - `done` runs once when the reply is complete
     - `error` runs instead of `done` when the prompt fails or is stopped
 
-    Every prompt ends in exactly one `done` or one `error`, so both clear `task` and add a new `## You` for the next prompt. Other handlers give you [tool calls](/build/tool-calls), [permission requests](/build/permissions) and token usage. See [every handler](/reference/api#events).
+    Every prompt ends in exactly one `done` or one `error`, so both clear `task` and add a new `## You` for the next prompt. Other handlers give you [tool calls](/reference/tool-calls), [permission requests](/reference/permissions) and token usage. See [every handler](/reference/api#handlers).
 
     `sdk.session()` returns straight away. Nothing is sent until the first prompt.
   </Step>
@@ -183,7 +183,7 @@ Everything goes in one file, `lua/your_plugin.lua`.
     end, { buffer = buf, desc = "Stop the reply" })
     ```
 
-    A stopped prompt ends in `error` with `event.cancelled` set to `true`, so the chat shows `_Stopped_`. It adds nothing to the history.
+    A stopped prompt ends in `error` with `data.cancelled` set to `true`, so the chat shows `_Stopped_`. It adds nothing to the history.
   </Step>
   <Step title="Close the session">
     When the buffer goes, so does the conversation. For an ACP agent like `claude_code`, closing the session also stops the agent's process:
@@ -249,21 +249,21 @@ local function chat(name)
   local session = sdk.session({
     adapter = adapter,
     on = {
-      reasoning = function(event)
+      reasoning = function(data)
         heading("### Reasoning")
-        append(event.text)
+        append(data.text)
       end,
-      text = function(event)
+      text = function(data)
         heading("### Answer")
-        append(event.text)
+        append(data.text)
       end,
       done = function()
         task = nil
         heading("## You")
       end,
-      error = function(event)
+      error = function(data)
         task = nil
-        heading(event.cancelled and "_Stopped_" or ("**Error:** " .. event.message))
+        heading(data.cancelled and "_Stopped_" or ("**Error:** " .. data.message))
         heading("## You")
       end,
     },
@@ -322,16 +322,16 @@ require("your_plugin").setup({ adapter = "claude_code" })
 Run `:AgentChat`, write a question under `## You`, then press `<Esc>` and `<CR>` to send it.
 
 <Note>
-This chat has no permission handler, so the SDK rejects every request the agent makes to read files or run commands. To let it, add a [permission policy](/build/permissions).
+This chat has no permission handler, so the SDK rejects every request the agent makes to read files or run commands. To let it, add a [permission policy](/reference/permissions).
 </Note>
 
 ## Next steps
 
 <Columns cols={2}>
-  <Card title="Permissions" icon="shield-check" href="/build/permissions">
+  <Card title="Permissions" icon="shield-check" href="/reference/permissions">
     Let the agent read files, and decide what else it's allowed to do.
   </Card>
-  <Card title="Sessions and prompts" icon="messages-square" href="/build/sessions">
+  <Card title="Sessions and prompts" icon="messages-square" href="/reference/sessions">
     Wait for a reply in a task, pick a model and read the history.
   </Card>
 </Columns>

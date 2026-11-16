@@ -42,7 +42,7 @@ Use only the API in the [reference](/reference/api). When the plugin needs somet
     3. Turn off features the adapter can't support, using `adapter.capabilities`
     4. Start a session with `sdk.session()`, with the session's handlers in `on`
 
-    Every session needs `text`, `done` and `error` handlers. The `error` handler skips events where `event.cancelled` is `true`. Every session also needs a [permission policy](/build/permissions), as any adapter the user picks can be an ACP agent.
+    Every session needs `text`, `done` and `error` handlers. The `error` handler returns early when `data.cancelled` is `true`. Every session also needs a [permission policy](/reference/permissions), as any adapter the user picks can be an ACP agent.
 
     **Done when** every conversation from step 1 starts this way, and every session has `text`, `done`, `error` and `request.permission` handlers.
   </Step>
@@ -60,7 +60,7 @@ Use only the API in the [reference](/reference/api). When the plugin needs somet
     **Done when** every `sdk.session()` call has a matching `session:close()` on every path that ends the conversation.
   </Step>
   <Step title="Test">
-    Write tests with the [test adapter](/build/testing), added through `agent_sdk.setup()` as a user would. For each conversation, cover:
+    Write tests with the [test adapter](/reference/test-adapter), added through `agent_sdk.setup()` as a user would. For each conversation, cover:
 
     - A reply that streams and ends in `done`
     - A reply that ends in `error`
