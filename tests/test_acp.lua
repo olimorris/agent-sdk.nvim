@@ -13,15 +13,12 @@ local function finish(message, result)
   agent.send({ id = message.id, result = result or { stopReason = "end_turn" } })
 end
 
-local function claude_code(overrides)
-  return require("agent_sdk.adapters").extend(
-    "claude_code",
-    vim.tbl_deep_extend("force", { commands = { default = { "some-agent" } } }, overrides or {})
-  )
+local function acp(overrides)
+  return vim.tbl_deep_extend("force", { base = "acp", commands = { default = { "some-agent" } } }, overrides or {})
 end
 
 local function make(session_opts, adapter)
-  sdk.setup({ adapters = { agent = adapter or claude_code() } })
+  sdk.setup({ adapters = { agent = adapter or acp() } })
   session_opts = session_opts or {}
   session_opts.adapter = sdk.adapter("agent")
   return sdk.session(session_opts)
@@ -49,10 +46,51 @@ T["the agent is started on the first prompt, not before"] = function()
   eq(agent.spawns[1].cmd, { "some-agent" })
 end
 
-T["the Claude Code adapter starts claude-agent-acp"] = function()
+T["an adapter with no command says how to set one"] = function()
+  local _, err = make(nil, "acp"):prompt("hi"):wait(1000)
+  eq(err.message:find("has no command to start its agent. Set commands.default", 1, true) ~= nil, true)
+  eq(#agent.spawns, 0)
+end
+
+T["an unset env variable isn't passed to the agent as its own name"] = function()
   agent.on_prompt = finish
-  make(nil, "claude_code"):prompt("hi"):wait(1000)
-  eq(agent.spawns[1].cmd, { "claude-agent-acp" })
+  make(nil, acp({ env = { AGENT_SDK_UNSET = "AGENT_SDK_UNSET", AGENT_SDK_SET = "cmd:printf token" } }))
+    :prompt("hi")
+    :wait(1000)
+  eq(agent.spawns[1].opts.env, { AGENT_SDK_SET = "token" })
+end
+
+T["auth"] = MiniTest.new_set()
+
+T["auth"]["without an auth method the agent signs in with what it has"] = function()
+  agent.auth_methods = { { id = "claude-login", name = "Log in" } }
+  agent.on_prompt = finish
+  local _, err = make():prompt("hi"):wait(1000)
+  eq(err, nil)
+  eq(#agent.methods("authenticate"), 0)
+end
+
+T["auth"]["the user's auth method is used to sign in"] = function()
+  agent.auth_methods = { { id = "api-key", name = "API key" }, { id = "chat-gpt", name = "ChatGPT" } }
+  agent.on_prompt = finish
+  make(nil, acp({ defaults = { auth_method = "chat-gpt" } })):prompt("hi"):wait(1000)
+  eq(agent.methods("authenticate")[1].params, { methodId = "chat-gpt" })
+end
+
+T["auth"]["an auth method the agent doesn't offer is an error that lists the ones it does"] = function()
+  agent.auth_methods = { { id = "api-key", name = "API key" } }
+  local _, err = make(nil, acp({ defaults = { auth_method = "oauth" } })):prompt("hi"):wait(1000)
+  eq(err.message, "agent-sdk.nvim: the agent doesn't offer the auth method oauth, only api-key")
+end
+
+T["auth"]["a session the agent refuses names its auth methods"] = function()
+  agent.auth_methods = { { id = "claude-login", name = "Log in" } }
+  agent.session_new_error = "Authentication required"
+  local _, err = make():prompt("hi"):wait(1000)
+  eq(
+    err.message,
+    "agent-sdk.nvim: the agent couldn't start a session: Authentication required. If the agent needs signing in, give it a credential in env or set defaults.auth_method to one of: claude-login"
+  )
 end
 
 T["the editor offers no file access or terminals"] = function()
@@ -169,11 +207,27 @@ T["a model the agent doesn't have ends the prompt in an error"] = function()
   eq(#agent.methods("session/prompt"), 0)
 end
 
-T["the user sets the agent's session options in their config"] = function()
+T["the user's parameters set the agent's session options"] = function()
   agent.on_prompt = finish
-  make(nil, claude_code({ defaults = { session_config_options = { mode = "Manual" } } })):prompt("hi"):wait(1000)
+  make(nil, acp({ parameters = { mode = "Manual" } })):prompt("hi"):wait(1000)
 
   eq(agent.methods("session/set_config_option")[1].params, { sessionId = "s1", configId = "mode", value = "default" })
+end
+
+T["the session's mode wins over the user's parameters"] = function()
+  agent.on_prompt = finish
+  make({ mode = "Manual" }, acp({ parameters = { mode = "plan" } })):prompt("hi"):wait(1000)
+
+  eq(agent.methods("session/set_config_option")[1].params.value, "default")
+end
+
+T["parameters win over defaults.session_config_options"] = function()
+  agent.on_prompt = finish
+  make(nil, acp({ parameters = { mode = "Manual" }, defaults = { session_config_options = { mode = "plan" } } }))
+    :prompt("hi")
+    :wait(1000)
+
+  eq(agent.methods("session/set_config_option")[1].params.value, "default")
 end
 
 T["tool calls carry the spec's fields and needs_result false"] = function()
@@ -397,12 +451,12 @@ end
 
 T["an agent that never answers session/new ends the prompt in an error"] = function()
   agent.silent["session/new"] = true
-  local _, err = make(nil, claude_code({ defaults = { timeout = 50 } })):prompt("hi"):wait(1000)
+  local _, err = make(nil, acp({ defaults = { timeout = 50 } })):prompt("hi"):wait(1000)
   eq(err.message, "agent-sdk.nvim: the agent couldn't start a session: session/new timed out")
 end
 
 T["an agent that can't be started ends the prompt in an error"] = function()
-  local _, err = make(nil, claude_code({ commands = { default = { "missing-agent" } } })):prompt("hi"):wait(1000)
+  local _, err = make(nil, acp({ commands = { default = { "missing-agent" } } })):prompt("hi"):wait(1000)
   eq(err.message, "agent-sdk.nvim: couldn't start missing-agent: ENOENT: no such file or directory")
 end
 
@@ -417,7 +471,7 @@ end
 T["the adapter's env reaches the agent's process"] = function()
   vim.env.AGENT_SDK_TEST_TOKEN = "secret"
   agent.on_prompt = finish
-  make(nil, claude_code({ env = { TOKEN = "AGENT_SDK_TEST_TOKEN" } })):prompt("hi"):wait(1000)
+  make(nil, acp({ env = { TOKEN = "AGENT_SDK_TEST_TOKEN" } })):prompt("hi"):wait(1000)
   vim.env.AGENT_SDK_TEST_TOKEN = nil
 
   eq(agent.spawns[1].opts.env.TOKEN, "secret")

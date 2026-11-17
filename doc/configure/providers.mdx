@@ -1,0 +1,155 @@
+---
+title: "Set up a provider or agent"
+sidebarTitle: "Providers and agents"
+description: "Copy-ready Agent SDK setups for Anthropic, Claude Code, OpenAI, OpenAI-compatible providers and any other ACP agent."
+keywords: ["acp", "anthropic", "api key", "claude code", "claude-agent-acp", "codex", "deepseek", "openai", "setup"]
+---
+
+Each setup below goes in `require("agent_sdk").setup({ adapters = { ... } })`. They all take the same shape. [Credentials](/reference/credentials) go in `env`, and everything else, like the model, how hard it thinks, or any setting the provider or agent accepts, goes in `parameters`. See [parameters](/reference/adapters#parameters) for how each key reaches each provider.
+
+You can hand this page to your coding agent to set it up for you.
+
+## Anthropic
+
+Reads your key from `ANTHROPIC_API_KEY`, so if that's set, `anthropic = "anthropic"` is enough:
+
+```lua
+anthropic = {
+  base = "anthropic",
+  env = { api_key = "cmd:op read op://Private/Anthropic_API/credential --no-newline" },
+  parameters = {
+    max_tokens = 32000,
+    model = "claude-opus-5-5",
+    thought_level = "high",
+  },
+},
+```
+
+Without a `model`, it uses `claude-sonnet-5`. Opus 5.5 always thinks, so don't set `thinking = { type = "disabled" }` for it.
+
+## Claude Code
+
+Runs Claude Code through [claude-agent-acp](https://github.com/agentclientprotocol/claude-agent-acp). First install it:
+
+```sh
+npm install -g @agentclientprotocol/claude-agent-acp
+```
+
+Check that Neovim can find it with `:echo exepath("claude-agent-acp")`. An empty result means it isn't on Neovim's `PATH`, so give its full path in `commands.default`.
+
+Then add it, signed in one of three ways:
+
+```lua
+-- 1. Your Claude Code login: if you've run `claude` on this machine and signed in
+claude_code = {
+  base = "acp",
+  commands = { default = { "claude-agent-acp" } },
+},
+
+-- 2. A subscription token, from `claude setup-token`
+claude_code = {
+  base = "acp",
+  commands = { default = { "claude-agent-acp" } },
+  env = { CLAUDE_CODE_OAUTH_TOKEN = "cmd:op read op://Private/Claude_Code/token --no-newline" },
+},
+
+-- 3. An Anthropic API key, billed to the API instead of your subscription
+claude_code = {
+  base = "acp",
+  commands = { default = { "claude-agent-acp" } },
+  env = { ANTHROPIC_API_KEY = "cmd:op read op://Private/Anthropic_API/credential --no-newline" },
+},
+```
+
+Pick Claude Code's options in `parameters`:
+
+```lua
+parameters = {
+  mode = "plan", -- default, acceptEdits, plan, auto or bypassPermissions
+  model = "opus", -- default, opus, sonnet, fable or haiku
+  thought_level = "high", -- default, low, medium, high, xhigh or max
+},
+```
+
+Claude Code decides these values, so they change with its version. A value it doesn't offer ends the prompt in an error that lists the ones it does.
+
+Claude Code reads files, writes files and runs commands itself, behind permission requests that the plugin answers. It works from disk, so it doesn't see unsaved changes.
+
+## OpenAI
+
+Reads your key from `OPENAI_API_KEY`, so if that's set, `openai = "openai"` is enough:
+
+```lua
+openai = {
+  base = "openai",
+  env = { api_key = "cmd:op read op://Private/OpenAI_API/credential --no-newline" },
+  parameters = {
+    model = "gpt-5.5",
+    thought_level = "high",
+  },
+},
+```
+
+Without a `model`, it uses `gpt-4.1`.
+
+## Other providers
+
+A provider that accepts OpenAI's Chat Completions format extends `openai` with its URL, key and models:
+
+```lua
+deepseek = {
+  base = "openai",
+  url = "https://api.deepseek.com/chat/completions",
+  env = { api_key = "DEEPSEEK_API_KEY" },
+  models = {
+    ["deepseek-v4-flash"] = {},
+    ["deepseek-v4-pro"] = { opts = { can_reason = true } },
+  },
+  parameters = { model = "deepseek-v4-flash" },
+},
+```
+
+When a provider's format differs from OpenAI's, override a handler. See [extending an adapter](/configure/adapters#extending-an-adapter).
+
+## Other ACP agents
+
+Any agent that speaks [ACP](https://agentclientprotocol.com) extends `acp` with the command that starts it:
+
+```lua
+codex = {
+  base = "acp",
+  commands = { default = { "codex-acp" } },
+  defaults = {
+    auth_method = "api-key",
+    mcpServers = {
+      { name = "github", command = "github-mcp-server", args = { "stdio" }, env = {} },
+    },
+    timeout = 30000,
+  },
+  env = { OPENAI_API_KEY = "cmd:op read op://Private/OpenAI_API/credential --no-newline" },
+},
+```
+
+An agent signs in one of three ways:
+
+- **It's already signed in on this machine.** Leave `env` and `defaults.auth_method` out
+- **It reads a credential from its environment.** Put it in `env`. A variable that isn't set isn't passed on
+- **It asks the editor to pick a sign-in method.** Set `defaults.auth_method` to one the agent offers
+
+If it can't sign in, the first prompt ends in an error that lists the agent's methods:
+
+```text
+agent-sdk.nvim: the agent couldn't start a session: Authentication required. If the agent needs signing in, give it a credential in env or set defaults.auth_method to one of: api-key, chat-gpt
+```
+
+`defaults.mcpServers` takes [ACP's format](https://agentclientprotocol.com/protocol/session-setup#mcp-servers). `defaults.timeout` is how long to wait for the agent to answer, in milliseconds, and defaults to `20000`.
+
+## If an agent doesn't start
+
+| Error | Fix |
+| --- | --- |
+| `has no command to start its agent` | Set `commands.default` |
+| `couldn't start claude-agent-acp: ENOENT` | The command isn't installed or isn't on Neovim's `PATH`. Install it, or give its full path |
+| `the agent couldn't start a session` | Usually the agent isn't signed in. See the sign-in options above |
+| `the agent doesn't offer the auth method ...` | Set `defaults.auth_method` to a method from the error's list |
+| `isn't one of the agent's ... options` | Use a value from the error's list in `parameters` |

@@ -75,11 +75,13 @@ function M.install()
           agentCapabilities = {
             sessionCapabilities = agent.system_prompt and { systemPrompt = { mode = {} } } or {},
           },
-          authMethods = {},
+          authMethods = agent.auth_methods or {},
         },
       })
     elseif method == "authenticate" then
       agent.send({ id = message.id, result = {} })
+    elseif method == "session/new" and agent.session_new_error then
+      agent.send({ id = message.id, error = { code = -32000, message = agent.session_new_error } })
     elseif method == "session/new" then
       agent.send({ id = message.id, result = { sessionId = "s1", configOptions = agent.config_options } })
     elseif method == "session/set_config_option" then

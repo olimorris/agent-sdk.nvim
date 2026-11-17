@@ -98,9 +98,11 @@ Tests should follow CodeCompanion's implementation, where actual output is captu
 ```lua
 local session = sdk.session({
   adapter = adapter, -- from sdk.adapter()
+  mode = "plan", -- optional, ACP agents only
   model = "claude-opus-5", -- optional, nil keeps the user's default
-  system_prompt = "...", -- optional
   on = { ... }, -- handlers for every prompt in the session
+  system_prompt = "...", -- optional
+  thought_level = "high", -- optional: mode, model and thought_level map to every adapter, see doc/reference/adapters.mdx
 })
 ```
 

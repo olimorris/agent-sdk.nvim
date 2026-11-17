@@ -1,0 +1,53 @@
+---
+title: "Logging"
+sidebarTitle: "Logging"
+description: "Turn on Agent SDK's log to see what's sent to providers and agents, and write your plugin's own entries to it, with Neovim's vim.log."
+keywords: ["agent-sdk.log", "debug", "log", "log_level", "troubleshooting", "vim.log"]
+---
+
+Agent SDK logs with Neovim's [`vim.log`](https://neovim.io/doc/user/lua.html#vim.log), to `agent-sdk.log` in `stdpath("log")`. By default it only writes warnings and errors, like a prompt that failed.
+
+## Turning it up
+
+Set `log_level` when you set up the SDK:
+
+```lua
+require("agent_sdk").setup({
+  adapters = { ... },
+  log_level = "debug",
+})
+```
+
+| Level | What's written |
+| --- | --- |
+| `error` | Every prompt that ends in an error, with the adapter's name |
+| `warn` | The default. Errors, plus lines from an agent that can't be read |
+| `info` | When an agent starts and exits |
+| `debug` | Each ACP message sent and received, the agent's stderr, and each HTTP request's adapter and URL |
+| `trace` | Every streamed ACP update and each HTTP request body |
+| `off` | Nothing |
+
+`log_level` also takes a `vim.log.levels` value. An unknown level makes `setup()` return `false` and the error.
+
+At `debug` and `trace`, the log holds your prompts and the replies. It never holds headers or `env`, so API keys and tokens stay out of it.
+
+To read it:
+
+```vim
+:execute "edit" stdpath("log") .. "/agent-sdk.log"
+```
+
+## From a plugin
+
+`sdk.log` is the SDK's logger, a `vim.Log`. Write to it when an entry belongs next to the SDK's own, or change its level while you debug:
+
+```lua
+local sdk = require("agent_sdk")
+
+sdk.log.debug("review started", { buf = bufnr })
+vim.log.set_level(sdk.log, vim.log.levels.TRACE)
+```
+
+Your plugin's own logging is better off in its own file, with `vim.log.new({ name = "your-plugin" })`.
+
+The SDK never shows a message itself. Errors reach your plugin as strings, through `sdk.adapter()`, `setup()` and a prompt's `error` handler, and your plugin decides how to show them.

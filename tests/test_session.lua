@@ -965,6 +965,14 @@ T["the effective model is the session's or the adapter's"] = function()
   eq(scripted.requests[1].model, "override")
 end
 
+T["the session's mode and thought_level reach the adapter"] = function()
+  local scripted = test.adapter({ replies = { { DONE } } })
+  sdk.setup({ adapters = { scripted = scripted } })
+  sdk.session({ adapter = sdk.adapter("scripted"), mode = "plan", thought_level = "high" }):prompt("a"):wait(1000)
+  eq(scripted.requests[1].thought_level, "high")
+  eq(scripted.requests[1].mode, "plan")
+end
+
 T["reasoning formed by the adapter is what the history keeps"] = function()
   local formed = { content = "r", _data = { signature = "sig" } }
   local _, session =

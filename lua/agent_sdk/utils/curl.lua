@@ -1,6 +1,8 @@
 --=============================================================================
 -- Curl - Ported from CodeCompanion's codecompanion/utils/curl.lua
 --=============================================================================
+local async = require("agent_sdk.utils.async")
+
 local fmt = string.format
 
 local M = {}
@@ -28,16 +30,15 @@ local function build_args(request)
   return args
 end
 
+---@async
 ---@param headers_file string
 ---@return number status, string[] headers
 local function read_headers(headers_file)
   local status, headers = 0, {}
-  local file = io.open(headers_file, "rb")
-  if not file then
+  local content = async.read_file(headers_file)
+  if not content then
     return status, headers
   end
-  local content = file:read("*a")
-  file:close()
 
   for _, line in ipairs(vim.split(content, "\r?\n")) do
     local code = line:match("^HTTP/%S+%s+(%d+)")
@@ -51,10 +52,11 @@ local function read_headers(headers_file)
   return status, headers
 end
 
+---@async
 local function build_response(opts)
   local request, result = opts.request, opts.result
   local status, headers = read_headers(request.headers_file)
-  os.remove(request.headers_file)
+  async.remove({ request.headers_file })
 
   if result.code ~= 0 or result.signal ~= 0 then
     local stderr = vim.trim(result.stderr or "")
@@ -106,15 +108,13 @@ end
 
 ---@param request agent_sdk.Curl.Request
 ---@return { args: string[], shutdown: fun() }
-local function async(request)
+local function start(request)
   local chunks = {}
   local stdout = read_stdout({ request = request, chunks = chunks })
 
   local ok, process = pcall(vim.system, request.args, { stdout = stdout }, function(result)
     result.stdout = table.concat(chunks)
-    vim.schedule(function()
-      report_result({ request = request, result = result })
-    end)
+    vim.async.run(report_result, { request = request, result = result }):raise_on_error()
   end)
 
   if not ok then
@@ -145,7 +145,7 @@ local function build_request(opts)
 end
 
 function M.request(opts)
-  return async(build_request(opts))
+  return start(build_request(opts))
 end
 
 function M.post(opts)

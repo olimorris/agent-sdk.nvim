@@ -1,0 +1,52 @@
+---
+title: "Adapters"
+sidebarTitle: "Adapters"
+description: "How Agent SDK's adapters line up across HTTP and ACP: the shared parameters, what each becomes for Anthropic, OpenAI and ACP agents, and how a session overrides them."
+keywords: ["acp", "adapters", "mode", "model", "parameters", "reasoning effort", "session config options", "thought_level"]
+---
+
+An adapter connects Agent SDK to a model or agent. An HTTP adapter like `anthropic` or `openai` calls a provider's API. The `acp` adapter runs an agent like Claude Code and talks to it over [ACP](https://agentclientprotocol.com). Users set adapters up once, in [Configure](/configure/adapters), and plugins use them by name.
+
+Both kinds take their settings in the same shape, so a user's config and a plugin's code read the same whichever kind sits behind them.
+
+## Parameters
+
+`parameters` sets how an adapter behaves, the same way for HTTP adapters and ACP agents. Three keys mean the same thing everywhere:
+
+```lua
+parameters = {
+  mode = "plan",
+  model = "claude-opus-5-5",
+  thought_level = "high",
+}
+```
+
+| Key | ACP agent | `anthropic` | `openai` |
+| --- | --- | --- | --- |
+| `mode` | The [`mode`](https://agentclientprotocol.com/protocol/session-config-options#option-categories) session option | Ignored | Ignored |
+| `model` | The [`model`](https://agentclientprotocol.com/protocol/session-config-options#option-categories) session option | [`model`](https://platform.claude.com/docs/en/api/messages/create) | [`model`](https://platform.openai.com/docs/api-reference/chat/create#chat-create-model) |
+| `thought_level` | The [`thought_level`](https://agentclientprotocol.com/protocol/session-config-options#option-categories) session option | [`output_config.effort`](https://platform.claude.com/docs/en/build-with-claude/effort) | [`reasoning_effort`](https://platform.openai.com/docs/api-reference/chat/create#chat-create-reasoning_effort) |
+| Any other key | The session option with that category | Sent in the request body as it is | Sent in the request body as it is |
+
+The names come from ACP. On an ACP agent, `parameters` are the agent's [session config options](https://agentclientprotocol.com/protocol/session-config-options), set by category when a session starts. CodeCompanion calls them `defaults.session_config_options`, and that still works, with `parameters` taking priority.
+
+On an HTTP adapter, `parameters` are the request body. The adapter turns `thought_level` into the provider's own field, and drops it for a model that can't reason. A `thought_level` of `"default"` keeps the model's own default. Every other key goes to the provider unchanged, so `temperature` or `top_p` work only where the provider accepts them.
+
+Each column comes from a mapping file in [`lua/agent_sdk/adapters/parameters/`](https://github.com/olimorris/agent-sdk.nvim/tree/main/lua/agent_sdk/adapters/parameters), one per API, which links every field to the vendor's documentation. A test checks this table against those files.
+
+Each agent and provider decides which values it accepts. `"high"` works for Claude Code, Anthropic and OpenAI, but `"xhigh"` doesn't work for all of them. An ACP agent ends the prompt in an error that lists its values. An HTTP provider returns its own error.
+
+## Setting them per session
+
+A plugin can set `mode`, `model` and `thought_level` for one session. Each replaces the user's value in `parameters` for that session only:
+
+```lua
+local session = sdk.session({
+  adapter = adapter,
+  mode = "plan",
+  model = "claude-opus-5-5",
+  thought_level = "high",
+})
+```
+
+A session takes only these three, as they're the ones every adapter understands. A plugin that sent `temperature` would break the moment its user picked an ACP agent.

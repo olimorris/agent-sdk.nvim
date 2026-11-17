@@ -11,7 +11,7 @@ Agent SDK is a Lua library with no plugin dependencies. Your plugin lists it as 
 
 - Neovim nightly (0.13-dev), as the SDK is built on `vim.async`
 - `curl`, for HTTP adapters
-- For ACP adapters, the agent itself. See [Claude Code](/configure/claude-code)
+- For ACP adapters, the agent itself. See [Claude Code](/configure/providers#claude-code)
 
 Put these in your plugin's README, as your users need them too.
 
@@ -45,9 +45,12 @@ Your plugin uses whichever adapter the user names, so you need one of your own t
 ```lua
 require("agent_sdk").setup({
   adapters = {
-    claude_code = "claude_code",
+    claude_code = {
+      base = "acp",
+      commands = { default = { "claude-agent-acp" } },
+    },
   },
 })
 ```
 
-See [Configure adapters](/configure/adapters) for credentials and every other option. Then build your first plugin with the [quickstart](/build/quickstart), or by hand with the [chat plugin walkthrough](/walkthroughs/chat-plugin).
+This one runs Claude Code. See [Claude Code](/configure/providers#claude-code) to install it and sign in, and [Configure adapters](/configure/adapters) for every other option. Then build your first plugin with the [quickstart](/build/quickstart), or by hand with the [chat plugin walkthrough](/walkthroughs/chat-plugin).

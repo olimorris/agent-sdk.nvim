@@ -5,6 +5,8 @@ local Curl = require("agent_sdk.utils.curl")
 
 local adapter_utils = require("agent_sdk.adapters.utils")
 local adapters = require("agent_sdk.adapters.http")
+local async = require("agent_sdk.utils.async")
+local log = require("agent_sdk.log")
 
 ---@class agent_sdk.HTTPPayload
 ---@field messages table
@@ -21,39 +23,27 @@ Client.static.methods = {
   schedule = { default = vim.schedule },
 }
 
----@param path string
+---@async
+---@param suffix string
 ---@param text string
-local function write_to_path(path, text)
-  local file = assert(io.open(path, "wb"))
-  file:write(text)
-  file:close()
-end
-
----@param body string
 ---@return string path
-local function write_body_file(body)
-  local path = vim.fn.tempname() .. ".json"
-  write_to_path(path, body)
+local function write_temp_file(suffix, text)
+  local path = vim.fn.tempname() .. suffix
+  local ok, err = async.write_file(path, text)
+  if not ok then
+    error(("agent-sdk.nvim: couldn't write the request to %s: %s"):format(path, err), 0)
+  end
   return path
 end
 
 ---@param headers table
----@return string path
-local function write_headers_file(headers)
+---@return string
+local function format_headers(headers)
   local lines = {}
   for k, v in pairs(headers) do
     table.insert(lines, k .. ": " .. tostring(v))
   end
-  local path = vim.fn.tempname() .. ".headers"
-  write_to_path(path, table.concat(lines, "\n"))
-  return path
-end
-
----@param paths string[]
-local function delete_temp_files(paths)
-  for _, path in ipairs(paths) do
-    os.remove(path)
-  end
+  return table.concat(lines, "\n")
 end
 
 ---@param opts? table
@@ -76,6 +66,7 @@ local function is_auth_failure(status)
   return status == 401 or status == 403
 end
 
+---@async
 ---@param self agent_sdk.HTTPClient
 ---@return agent_sdk.HTTPAdapter|nil adapter, string|nil err
 local function prepare_adapter(self)
@@ -107,6 +98,7 @@ function Client.merge_body(adapter, payload)
 end
 
 ---Assemble the curl args shared by every request, plus the adapter's headers file
+---@async
 ---@param adapter agent_sdk.HTTPAdapter
 ---@param opts? { stream?: boolean }
 ---@return table raw, string headers_file
@@ -133,7 +125,7 @@ function Client.build_curl_args(adapter, opts)
     vim.list_extend(raw, adapter_utils.set_env_vars(adapter, adapter.raw))
   end
 
-  local headers_file = write_headers_file(adapter_utils.set_env_vars(adapter, adapter.headers))
+  local headers_file = write_temp_file(".headers", format_headers(adapter_utils.set_env_vars(adapter, adapter.headers)))
   vim.list_extend(raw, { "--header", "@" .. headers_file })
 
   return raw, headers_file
@@ -153,75 +145,96 @@ end
 ---@field callback fun(err: nil|table, data: nil|string|table, adapter: agent_sdk.HTTPAdapter|nil) Runs once per streamed line, or once with the whole response
 ---@field done? fun() Runs when the request is complete
 
----Send a HTTP request
+---Send a HTTP request and wait for it to end. Closing the task stops the request
+---@async
 ---@param payload agent_sdk.HTTPPayload
 ---@param actions agent_sdk.HTTPAdapter.RequestActions
----@return { shutdown: fun() }|nil
 function Client:request(payload, actions)
   -- Make a copy of the adapter to ensure that we replace variables in every request
   local adapter, err = prepare_adapter(self)
   if not adapter then
     actions.callback({ message = err }, nil, nil)
-    return nil
+    return
   end
 
-  local body_file = write_body_file(self.methods.encode(Client.merge_body(adapter, payload)))
+  local body = self.methods.encode(Client.merge_body(adapter, payload))
+  local url = adapter_utils.set_env_vars(adapter, adapter.url)
+  -- Never log the headers or env: they hold the user's credentials
+  log.debug("http request", adapter.name, url)
+  log.trace("http body", body)
+  local body_file = write_temp_file(".json", body)
   local raw, headers_file = Client.build_curl_args(adapter, { stream = adapter.opts and adapter.opts.stream })
+  local temp_files = { body_file, headers_file }
 
   -- Capture streaming errors for use in final callback
   local stream_error_body = nil
 
-  local request_opts = {
-    body_file = body_file,
-    raw = raw,
-    url = adapter_utils.set_env_vars(adapter, adapter.url),
-    callback = function(data)
-      self.methods.schedule(function()
-        if not adapter.opts.stream and data and data ~= "" then
-          actions.callback(nil, data, adapter)
-        end
-
-        adapters.call_handler(adapter, "on_exit", { data = data })
-
-        if actions.done then
-          actions.done()
-        end
-
-        if data and data.status and data.status >= 400 then
-          if is_auth_failure(data.status) then
-            adapter_utils.clear_cached_cmds(adapter)
+  vim.async.await(function(finished)
+    local request_opts = {
+      body_file = body_file,
+      raw = raw,
+      url = url,
+      callback = function(data)
+        self.methods.schedule(function()
+          if not adapter.opts.stream and data and data ~= "" then
+            actions.callback(nil, data, adapter)
           end
-          actions.callback({ message = string.format([[%d error: ]], data.status), stderr = data }, nil, adapter)
-        elseif stream_error_body then
-          actions.callback({ message = "Request failed", stderr = stream_error_body }, nil, adapter)
-        end
 
-        delete_temp_files({ body_file, headers_file })
-      end)
-    end,
-    on_error = function(curl_err)
-      self.methods.schedule(function()
-        actions.callback(curl_err, nil, adapter)
-        delete_temp_files({ body_file, headers_file })
-      end)
-    end,
-  }
+          adapters.call_handler(adapter, "on_exit", { data = data })
 
-  if adapter.opts and adapter.opts.stream then
-    -- This will be called multiple times until the stream is finished
-    request_opts.stream = function(data)
-      if data and data ~= "" then
-        local cleaned = adapter_utils.clean_streamed_data(data)
-        if cleaned:match('^%s*{"error"') or cleaned:match('^%s*{"type"%s*:%s*"error"') then
-          stream_error_body = cleaned
-          return
+          if actions.done then
+            actions.done()
+          end
+
+          if data and data.status and data.status >= 400 then
+            if is_auth_failure(data.status) then
+              adapter_utils.clear_cached_cmds(adapter)
+            end
+            actions.callback({ message = string.format([[%d error: ]], data.status), stderr = data }, nil, adapter)
+          elseif stream_error_body then
+            actions.callback({ message = "Request failed", stderr = stream_error_body }, nil, adapter)
+          end
+
+          async.remove(temp_files)
+          finished()
+        end)
+      end,
+      on_error = function(curl_err)
+        self.methods.schedule(function()
+          actions.callback(curl_err, nil, adapter)
+          async.remove(temp_files)
+          finished()
+        end)
+      end,
+    }
+
+    if adapter.opts and adapter.opts.stream then
+      -- This will be called multiple times until the stream is finished
+      request_opts.stream = function(data)
+        if data and data ~= "" then
+          local cleaned = adapter_utils.clean_streamed_data(data)
+          if cleaned:match('^%s*{"error"') or cleaned:match('^%s*{"type"%s*:%s*"error"') then
+            stream_error_body = cleaned
+            return
+          end
         end
+        actions.callback(nil, data, adapter)
       end
-      actions.callback(nil, data, adapter)
     end
-  end
 
-  return self.methods.post(request_opts)
+    local job = self.methods.post(request_opts)
+    return {
+      close = function(_, callback)
+        if job then
+          pcall(job.shutdown)
+        end
+        async.remove(temp_files)
+        if callback then
+          callback()
+        end
+      end,
+    }
+  end)
 end
 
 --=============================================================================
@@ -256,10 +269,10 @@ local function resolve(adapter, request)
   resolved.opts.stream = request.stream ~= false
   resolved.parameters = resolved.parameters or {}
   resolved.temp = resolved.temp or {}
-  if request.model and resolved.schema and resolved.schema.model then
-    resolved.schema.model.default = request.model
-  end
-  return adapters.map_schema_to_params(resolved)
+  resolved = adapters.map_schema_to_params(resolved)
+  resolved.parameters.model = request.model or resolved.parameters.model or resolved.model
+  resolved.parameters.thought_level = request.thought_level or resolved.parameters.thought_level
+  return resolved
 end
 
 ---@param adapter agent_sdk.HTTPAdapter
@@ -280,7 +293,8 @@ function M.connect(adapter)
     local prepared, had_error, cancelled = nil, false, false
     local id = {}
 
-    local job = Client.new({ adapter = resolved }):request({ messages = messages }, {
+    local client = Client.new({ adapter = resolved })
+    local actions = {
       callback = function(err, data, used)
         prepared = used or prepared
         if cancelled or had_error then
@@ -299,6 +313,9 @@ function M.connect(adapter)
         end
 
         local result = adapters.call_handler(prepared, "parse_chat", { data = data, tools = tools })
+        if result and result.extra and adapters.get_handler(prepared, "parse_meta") then
+          result = adapters.call_handler(prepared, "parse_meta", { data = result })
+        end
         local output = result and result.status == "success" and result.output
         if not output then
           return
@@ -339,7 +356,19 @@ function M.connect(adapter)
           emit({ type = "done", reasoning = formed or nil })
         end)
       end,
-    })
+    }
+
+    local task = vim.async.run(function()
+      client:request({ messages = messages }, actions)
+    end)
+    -- A Lua error inside the request would otherwise end the task without a word to the plugin
+    task:on_complete(function(err)
+      if err and not cancelled and not had_error then
+        had_error = true
+        running[id] = nil
+        emit({ type = "error", message = "agent-sdk.nvim: " .. tostring(err) })
+      end
+    end)
 
     local function cancel()
       if cancelled then
@@ -347,9 +376,7 @@ function M.connect(adapter)
       end
       cancelled = true
       running[id] = nil
-      if job then
-        pcall(job.shutdown)
-      end
+      task:close()
     end
     running[id] = cancel
     return cancel

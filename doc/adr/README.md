@@ -19,3 +19,6 @@ To add one, copy the next number and write a title and a short paragraph. Add "C
 - [0013](0013-a-public-test-adapter.md) - The SDK ships a public test adapter
 - [0014](0014-transports-and-adapters-are-ports-of-codecompanion.md) - Transports and adapters are ports of CodeCompanion's code
 - [0015](0015-one-adapter-per-api-format.md) - The SDK ships one adapter per API format, and other providers extend one
+- [0016](0016-parameters-are-shared-by-http-and-acp.md) - HTTP adapters and ACP agents share `parameters`
+- [0017](0017-one-acp-adapter.md) - One ACP adapter, and agents are config
+- [0018](0018-adapters-name-their-base.md) - Adapters name their base instead of calling extend()

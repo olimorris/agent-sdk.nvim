@@ -7,9 +7,10 @@
 ---@field commands { default: string[], selected?: string[], [string]: string[] }
 ---@field command? string[] The command that starts the agent, resolved from `commands`
 ---@field defaults? { mcpServers?: table, timeout?: number, auth_method?: string, session_config_options?: table<string, string> }
+---@field parameters? table<string, string> The agent's session config options by category, e.g. `mode`, `model` or `thought_level`. Merged over `defaults.session_config_options`
 ---@field env? table
 ---@field env_replaced? table
----@field parameters table The params sent with `initialize`
+---@field initialize table The params sent with `initialize`. CodeCompanion calls this `parameters`
 ---@field handlers? agent_sdk.ACPAdapter.Handlers
 
 ---@class agent_sdk.ACPAdapter.Handlers

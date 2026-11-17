@@ -20,7 +20,7 @@ The two work very differently. An HTTP request is stateless and the plugin does 
 Each adapter uses one of the two transports:
 
 - **HTTP adapters**, like `anthropic`, send requests to a model's API
-- **ACP adapters**, like `claude_code`, start an agent and talk to it over ACP
+- **ACP adapters**, extended from `acp` for an agent like Claude Code, start the agent and talk to it over ACP
 
 Your plugin uses both the same way: `sdk.session()`, `session:prompt()` and the same [handlers](/reference/api#handlers), with the same field names. The SDK covers the differences. On HTTP, it keeps the history and sends it on every request. On ACP, it starts the agent's process on the first prompt and passes its permission requests to your plugin.
 

@@ -24,7 +24,7 @@ agent-sdk.nvim is a headless library that does this once. Users configure their 
 - Configures adapters, credentials and models once, in `setup({ adapters = ... })`
 - Credentials work as in CodeCompanion: environment variables, `cmd:` for password managers, and functions
 - Adds third-party adapters in their own setup (`adapters = { vertex = require("vertex-adapter") }`). A plugin never registers an adapter itself
-- Extends a built-in adapter with `require("agent_sdk.adapters").extend(...)`, as in CodeCompanion. A string (`claude_code = "claude_code"`) uses a built-in adapter unchanged
+- Builds on a built-in adapter with `base = "name"` in the adapter's table, resolved when a plugin first asks for it. A string (`anthropic = "anthropic"`) uses a built-in adapter unchanged. CodeCompanion's `extend()` is gone
 
 ## Plugins
 
@@ -126,15 +126,20 @@ Tool calls are passed straight through to the plugin's `on.request.tool_call` ha
 
 - Port CodeCompanion's clients and adapters, keeping its structure and names, and drop what the SDK doesn't need ([0014](adr/0014-transports-and-adapters-are-ports-of-codecompanion.md))
 - The ACP client follows CodeCompanion's flow with leaner code and its own names. Each file's header names the CodeCompanion file it came from
-- HTTP adapters use CodeCompanion's nested handlers (`lifecycle`, `request`, `response`, `tools`) and its `schema`
-- An adapter is included only if it needs code beyond config
-- OpenRouter is the one exception and ships as its own adapter because of its scale. It extends `openai_compatible`
-- `openai_compatible` is the base for everything else. Providers like Novita are config examples in the docs, not adapters
-- HTTP: Anthropic, OpenAI Responses, OpenAI Chat Completions, `openai_compatible`, Gemini, Ollama, OpenRouter. Copilot is still to decide, as its token exchange is vendor-specific
-- ACP: CodeCompanion's ACP adapter shape (`commands`, `defaults`, `parameters`, `handlers`), plus presets for Claude Code, Codex and Gemini CLI. Claude Code is built
-- The user sets an agent's session options (`model`, `mode`, `thought_level`) in `defaults.session_config_options`, by category. Presets set none. A value the agent doesn't offer ends the prompt in an error
+- HTTP adapters use CodeCompanion's nested handlers (`lifecycle`, `request`, `response`, `tools`). Built-ins ship no `schema`: a default `model`, a `models` map with per-model flags, and plain `parameters`. A user can still add a `schema`
+- One adapter per API format, and every other provider extends one ([0015](adr/0015-one-adapter-per-api-format.md))
+- Each API's mapping from the shared parameters (`mode`, `model`, `thought_level`) to its own fields is a data file in `lua/agent_sdk/adapters/parameters/`, with a link to the vendor's docs for every field. An adapter calls `parameters.translate()` in `build_parameters`, and a new API format adds a file there
+- HTTP: Anthropic and OpenAI Chat Completions are built. OpenAI Responses, Gemini and Copilot are to come
+- ACP: one `acp` adapter in CodeCompanion's ACP adapter shape (`commands`, `defaults`, `handlers`). Agents like Claude Code are the user's config extending it, with a Configure page each ([0017](adr/0017-one-acp-adapter.md)). The `initialize` params live in `initialize`, which CodeCompanion calls `parameters`
+- The SDK calls `authenticate` only with the user's `defaults.auth_method`. Otherwise the agent signs in with what it has, and a refused session lists its auth methods
+- The user sets an agent's session options (`mode`, `model`, `thought_level`) in `parameters`, by category, the same key HTTP adapters use ([0016](adr/0016-parameters-are-shared-by-http-and-acp.md)). `defaults.session_config_options` still works. Presets set none. A value the agent doesn't offer ends the prompt in an error
 - The session's model goes through the agent's `model` option
 - `system_prompt` is sent only to an agent that advertises `systemPrompt`, as CodeCompanion does
+
+## Async
+
+- Nothing in the SDK blocks Neovim. Subprocesses, file reads and writes, HTTP requests and timeouts run inside `vim.async` tasks, through `lua/agent_sdk/utils/async.lua` ([0004](adr/0004-built-on-vim-async.md))
+- Closing a prompt's task closes what it's waiting on: the curl job, the agent request, or a `cmd:` credential's process
 
 ## Testing
 

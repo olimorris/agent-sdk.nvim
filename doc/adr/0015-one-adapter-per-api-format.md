@@ -15,4 +15,4 @@ This replaces the second paragraph of [0012](0012-adapters-start-from-codecompan
 
 - The docs show how to extend an adapter, including overriding handlers, with Ollama and OpenRouter as examples
 - An adapter for a popular provider can live in its own plugin, and later in an Agent SDK organisation, without a pull request to this repo
-- ACP agents should follow the same rule, from one base ACP adapter. Not decided yet, see `TODO.md`
+- ACP agents follow the same rule, from one `acp` adapter. See [0017](0017-one-acp-adapter.md)

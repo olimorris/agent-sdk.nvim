@@ -83,17 +83,45 @@ T["changing a returned adapter leaves the next one untouched"] = function()
   eq(user.model, "a")
 end
 
-T["extend merges overrides over a table base"] = function()
-  local base = { type = "http", model = "a", capabilities = { tools = true } }
-  local extended = adapters.extend(base, { model = "b", capabilities = { vision = true } })
-  eq(extended, { type = "http", model = "b", capabilities = { tools = true, vision = true } })
-  eq(base.model, "a")
+T["base merges the user's table over the built-in"] = function()
+  sdk.setup({ adapters = { custom = { base = "anthropic", env = { other = "X" }, url = "https://example.com" } } })
+  local adapter = sdk.adapter("custom")
+  eq(adapter.url, "https://example.com")
+  eq(adapter.env, { api_key = "ANTHROPIC_API_KEY", other = "X" })
+  eq(adapter.base, nil)
+  eq(require("agent_sdk.adapters.http.anthropic").url, "https://api.anthropic.com/v1/messages")
 end
 
-T["extend errors for an unknown built-in"] = function()
-  MiniTest.expect.error(function()
-    adapters.extend("no_such_builtin", {})
-  end, "no_such_builtin")
+T["a string is shorthand for a base with nothing changed"] = function()
+  sdk.setup({ adapters = { custom = "anthropic" } })
+  eq(sdk.adapter("custom").url, "https://api.anthropic.com/v1/messages")
+end
+
+T["base replaces the model list rather than merging it"] = function()
+  sdk.setup({ adapters = { custom = { base = "anthropic", models = { mine = {} } } } })
+  eq(sdk.adapter("custom").models, { mine = {} })
+end
+
+T["capabilities list the adapter's models"] = function()
+  sdk.setup({ adapters = { custom = { base = "openai", models = { b = {}, a = {} } } } })
+  local adapter = sdk.adapter("custom")
+  eq(adapter.capabilities.models, { "a", "b" })
+  eq(adapter:has_model("c"), false)
+end
+
+T["a base that isn't a built-in returns an error"] = function()
+  sdk.setup({ adapters = { custom = { base = "no_such_builtin" } } })
+  local adapter, err = sdk.adapter("custom")
+  eq(adapter, nil)
+  eq(err, 'agent-sdk.nvim: adapter "custom" has the base "no_such_builtin", which isn\'t a built-in adapter')
+end
+
+T["setup loads no built-in until a plugin asks for one"] = function()
+  package.loaded["agent_sdk.adapters.http.openai"] = nil
+  sdk.setup({ adapters = { custom = { base = "openai" } } })
+  eq(package.loaded["agent_sdk.adapters.http.openai"], nil)
+  sdk.adapter("custom")
+  eq(type(package.loaded["agent_sdk.adapters.http.openai"]), "table")
 end
 
 T["session errors without connect"] = function()

@@ -1,11 +1,15 @@
+local log = require("agent_sdk.log")
+
 local M = {}
 
 ---@class agent_sdk.Request
 ---@field content table[]
 ---@field messages table[]?
+---@field mode string?
 ---@field model string?
----@field system_prompt string?
 ---@field stream boolean
+---@field system_prompt string?
+---@field thought_level string?
 
 ---@class agent_sdk.Connection
 ---@field request fun(self: agent_sdk.Connection, request: agent_sdk.Request, emit: fun(event: table)): fun()?
@@ -22,9 +26,11 @@ local M = {}
 
 ---@class agent_sdk.SessionOpts
 ---@field adapter agent_sdk.Adapter
+---@field mode string?
 ---@field model string?
----@field system_prompt string?
 ---@field on agent_sdk.Handlers?
+---@field system_prompt string?
+---@field thought_level string?
 
 ---@class agent_sdk.PromptOpts
 ---@field stream boolean?
@@ -104,9 +110,11 @@ local function new_turn(session, content, opts)
   }
   turn.request = {
     content = normalise(content),
+    mode = session.mode,
     model = session.model,
-    system_prompt = session.system_prompt,
     stream = turn.stream,
+    system_prompt = session.system_prompt,
+    thought_level = session.thought_level,
   }
   if session.adapter.type == "http" then
     turn.request.messages = vim.deepcopy(session.messages)
@@ -182,6 +190,9 @@ local function emit(session, turn, event)
   if turn.finished or turn.stopping then
     return
   end
+  if event.type == "error" then
+    log.error(session.adapter.name, event.message)
+  end
   enqueue(session, turn, event)
 end
 
@@ -221,9 +232,11 @@ local function send_tool_results(session, turn)
   turn.request = {
     content = results,
     messages = vim.list_extend(vim.deepcopy(session.messages), vim.deepcopy(turn.messages)),
+    mode = session.mode,
     model = session.model,
-    system_prompt = session.system_prompt,
     stream = turn.stream,
+    system_prompt = session.system_prompt,
+    thought_level = session.thought_level,
   }
   send(session, turn)
 end
@@ -427,8 +440,10 @@ end
 
 local function connect(session)
   local connection = session.adapter.connect(session.adapter, {
+    mode = session.mode,
     model = session.model,
     system_prompt = session.system_prompt,
+    thought_level = session.thought_level,
   })
   assert(type(connection) == "table", "adapter.connect must return a connection")
   session.connection = connection
@@ -464,12 +479,14 @@ function M.new(opts)
 
   return setmetatable({
     adapter = adapter,
-    model = opts.model or adapter.model,
-    system_prompt = opts.system_prompt,
-    on = opts.on or {},
-    messages = {},
-    queue = {},
     closed = false,
+    messages = {},
+    mode = opts.mode,
+    model = opts.model or adapter.model,
+    on = opts.on or {},
+    queue = {},
+    system_prompt = opts.system_prompt,
+    thought_level = opts.thought_level,
   }, Session)
 end
 

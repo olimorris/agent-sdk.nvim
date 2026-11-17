@@ -16,12 +16,14 @@
 ---@field temp? table
 ---@field raw? string[]
 ---@field handlers agent_sdk.HTTPAdapter.Handlers
----@field schema table
+---@field model? string The default model, which a session's `model` replaces
+---@field models? table<string, agent_sdk.Model>
+---@field schema? table
 
 ---@class agent_sdk.HTTPAdapter.Handlers
 ---@field lifecycle? { setup?: (fun(self): boolean), on_exit?: fun(self, args: { data: table }) }
----@field request? { build_parameters?: function, build_messages?: function, build_reasoning?: function, build_body?: function }
----@field response? { parse_chat?: function, parse_tokens?: function }
+---@field request? { build_parameters?: function, build_messages?: function, build_tools?: function, build_reasoning?: function, build_body?: function }
+---@field response? { parse_chat?: function, parse_meta?: function, parse_tokens?: function }
 ---@field tools? { format_calls?: function }
 
 local M = {}

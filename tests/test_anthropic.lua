@@ -10,9 +10,10 @@ local function stub(name)
 end
 
 local function anthropic(overrides)
-  return require("agent_sdk.adapters").extend(
-    "anthropic",
-    vim.tbl_deep_extend("force", { env = { api_key = "cmd:printf dummy-key" } }, overrides or {})
+  return vim.tbl_deep_extend(
+    "force",
+    { base = "anthropic", env = { api_key = "cmd:printf dummy-key" } },
+    overrides or {}
   )
 end
 
@@ -191,7 +192,7 @@ T["body: the system prompt, the session's model and its max_tokens"] = function(
   eq(body.cache_control, { type = "ephemeral" })
 end
 
-T["body: the schema's default model and no system prompt"] = function()
+T["body: the adapter's default model and no system prompt"] = function()
   make({ stub("anthropic_text.txt") }):prompt("hi"):wait(1000)
 
   local body = fake.calls[1].body
@@ -200,9 +201,7 @@ T["body: the schema's default model and no system prompt"] = function()
 end
 
 T["body: the user can change the default model in their config"] = function()
-  make({ stub("anthropic_text.txt") }, { adapter = { schema = { model = { default = "claude-opus-5-5" } } } })
-    :prompt("hi")
-    :wait(1000)
+  make({ stub("anthropic_text.txt") }, { adapter = { model = "claude-opus-5-5" } }):prompt("hi"):wait(1000)
   eq(fake.calls[1].body.model, "claude-opus-5-5")
 end
 
@@ -236,6 +235,74 @@ T["body: results for one reply's tool calls go back as one user message"] = func
       { type = "tool_result", tool_use_id = "b", content = "two", is_error = true },
     },
   })
+end
+
+T["body: the user can turn thinking off"] = function()
+  make({ stub("anthropic_text.txt") }, { adapter = { parameters = { thinking = { type = "disabled" } } } })
+    :prompt("hi")
+    :wait(1000)
+  eq(fake.calls[1].body.thinking, { type = "disabled" })
+end
+
+T["body: a model outside the list gets no thinking and the fallback max_tokens"] = function()
+  make({ stub("anthropic_text.txt") }, { model = "claude-3-haiku" }):prompt("hi"):wait(1000)
+
+  local body = fake.calls[1].body
+  eq(body.thinking, nil)
+  eq(body.max_tokens, 4096)
+end
+
+T["body: a user's schema still maps to the parameters"] = function()
+  make({ stub("anthropic_text.txt") }, {
+      adapter = { schema = { stop_sequences = { mapping = "parameters", default = { "END" } } } },
+    })
+    :prompt("hi")
+    :wait(1000)
+  eq(fake.calls[1].body.stop_sequences, { "END" })
+end
+
+T["parameters: thought_level becomes the effort"] = function()
+  make({ stub("anthropic_text.txt") }, { adapter = { parameters = { mode = "plan", thought_level = "xhigh" } } })
+    :prompt("hi")
+    :wait(1000)
+
+  local body = fake.calls[1].body
+  eq(body.output_config, { effort = "xhigh" })
+  eq(body.thought_level, nil)
+  eq(body.mode, nil)
+end
+
+T["parameters: a thought_level of default leaves the model's own effort"] = function()
+  make({ stub("anthropic_text.txt") }, { adapter = { parameters = { thought_level = "default" } } })
+    :prompt("hi")
+    :wait(1000)
+  eq(fake.calls[1].body.output_config, nil)
+end
+
+T["parameters: no effort for a model that can't reason"] = function()
+  make(
+      { stub("anthropic_text.txt") },
+      { model = "claude-3-haiku", adapter = { parameters = { thought_level = "high" } } }
+    )
+    :prompt("hi")
+    :wait(1000)
+  eq(fake.calls[1].body.output_config, nil)
+end
+
+T["parameters: the session's thought_level wins over the user's"] = function()
+  sdk.setup({ adapters = { anthropic = anthropic({ parameters = { thought_level = "low" } }) } })
+  fake.on_call = function(call)
+    fake_http.deliver(call, stub("anthropic_text.txt"))
+  end
+  sdk.session({ adapter = sdk.adapter("anthropic"), thought_level = "max" }):prompt("hi"):wait(1000)
+  eq(fake.calls[1].body.output_config, { effort = "max" })
+end
+
+T["parameters: the user's model replaces the adapter's default"] = function()
+  make({ stub("anthropic_text.txt") }, { adapter = { parameters = { model = "claude-opus-5-5" } } })
+    :prompt("hi")
+    :wait(1000)
+  eq(fake.calls[1].body.model, "claude-opus-5-5")
 end
 
 return T

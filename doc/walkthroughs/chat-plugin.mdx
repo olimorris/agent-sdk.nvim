@@ -18,11 +18,13 @@ Before your plugin runs, your user has installed Agent SDK and set up their adap
 ```lua
 require("agent_sdk").setup({
   adapters = {
-    claude_code = require("agent_sdk.adapters").extend("claude_code", {
+    claude_code = {
+      base = "acp",
+      commands = { default = { "claude-agent-acp" } },
       env = {
         CLAUDE_CODE_OAUTH_TOKEN = "cmd:op read op://Private/Claude_Code/credential --no-newline",
       },
-    }),
+    },
   },
 })
 ```

@@ -42,8 +42,7 @@
         "group": "Configure",
         "pages": [
           "configure/adapters",
-          "configure/anthropic",
-          "configure/claude-code"
+          "configure/providers"
         ]
       },
       {
@@ -65,6 +64,9 @@
         "group": "Reference",
         "pages": [
           "reference/api",
+          "reference/adapters",
+          "reference/credentials",
+          "reference/logging",
           "reference/sessions",
           "reference/tool-calls",
           "reference/permissions",
@@ -74,6 +76,10 @@
     ]
   },
   "redirects": [
+    { "source": "/configure/acp", "destination": "/configure/providers#other-acp-agents" },
+    { "source": "/configure/anthropic", "destination": "/configure/providers#anthropic" },
+    { "source": "/configure/claude-code", "destination": "/configure/providers#claude-code" },
+    { "source": "/configure/openai", "destination": "/configure/providers#openai" },
     {
       "source": "/build/errors",
       "destination": "/reference/sessions#failed-prompts"

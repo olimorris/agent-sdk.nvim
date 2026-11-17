@@ -15,7 +15,7 @@ local sdk = require("agent_sdk")
 
 `sdk.setup({ adapters = { ... } })` registers the user's adapters. Plugins don't call it, except in tests. See [Configure adapters](/configure/adapters).
 
-`require("agent_sdk.adapters").extend(name, overrides)` copies a built-in adapter and overrides any part of it.
+An adapter in `setup()` with `base = "name"` copies that built-in adapter and overrides any part of it. One without `base` is a complete adapter, used as it is.
 
 ## Adapters
 
@@ -35,9 +35,11 @@ local sdk = require("agent_sdk")
 ```lua
 local session = sdk.session({
   adapter = adapter, -- from sdk.adapter()
+  mode = "plan", -- optional, ACP agents only
   model = "claude-opus-5", -- optional, nil keeps the user's default
-  system_prompt = "...", -- optional
   on = { ... }, -- handlers for every prompt in the session
+  system_prompt = "...", -- optional
+  thought_level = "high", -- optional, see /reference/adapters
 })
 ```
 

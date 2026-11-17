@@ -5,6 +5,8 @@ local METHODS = require("agent_sdk.acp.methods")
 local Prompt = require("agent_sdk.acp.prompt")
 local acp_adapter = require("agent_sdk.adapters.acp")
 local adapter_utils = require("agent_sdk.adapters.utils")
+local async = require("agent_sdk.utils.async")
+local log = require("agent_sdk.log")
 local options = require("agent_sdk.acp.config_options")
 
 ---@class agent_sdk.ACP.Connection
@@ -56,6 +58,7 @@ function Connection:write(message)
     return false
   end
   message.jsonrpc = "2.0"
+  log.debug("acp send", message)
   return (pcall(self._process.write, self._process, vim.json.encode(message) .. "\n"))
 end
 
@@ -83,17 +86,28 @@ end
 ---@param timeout? number
 ---@return any result, string|nil err
 function Connection:request(method, params, timeout)
-  return vim.async.await(function(callback)
-    local id = self:send(method, params, callback)
-    if timeout then
-      vim.defer_fn(function()
-        if self._pending[id] == callback then
+  local function send()
+    return vim.async.await(function(callback)
+      local id = self:send(method, params, callback)
+      return {
+        close = function(_, closed)
           self._pending[id] = nil
-          callback(nil, ("%s timed out"):format(method))
-        end
-      end, timeout)
-    end
-  end)
+          if closed then
+            closed()
+          end
+        end,
+      }
+    end)
+  end
+  if not timeout then
+    return send()
+  end
+
+  local ok, result, err = async.timeout(timeout, send)
+  if not ok then
+    return nil, ("%s timed out"):format(method)
+  end
+  return result, err
 end
 
 ---@param id number
@@ -149,7 +163,14 @@ local DISPATCH = {
 function Connection:dispatch(line)
   local ok, message = pcall(vim.json.decode, line)
   if not ok or type(message) ~= "table" then
+    log.warn("acp unreadable line", line)
     return
+  end
+  -- Streamed updates arrive once per chunk, so they'd bury everything else at debug
+  if message.method == "session/update" then
+    log.trace("acp recv", message)
+  else
+    log.debug("acp recv", message)
   end
 
   if message.method then
@@ -183,10 +204,18 @@ function Connection:resolve_adapter()
     return nil, err
   end
   adapter.defaults = adapter.defaults or {}
-  adapter.parameters = adapter_utils.set_env_vars(adapter, adapter.parameters)
+  adapter.initialize = adapter_utils.set_env_vars(adapter, adapter.initialize)
   adapter.defaults.auth_method = adapter_utils.set_env_vars(adapter, adapter.defaults.auth_method)
   adapter.defaults.mcpServers = adapter_utils.set_env_vars(adapter, adapter.defaults.mcpServers)
-  adapter.command = adapter_utils.set_env_vars(adapter, adapter.commands.selected or adapter.commands.default)
+  local commands = adapter.commands or {}
+  local command = commands.selected or commands.default
+  if type(command) ~= "table" or #command == 0 then
+    return nil,
+      ('the adapter %s has no command to start its agent. Set commands.default, e.g. { "claude-agent-acp" }'):format(
+        tostring(adapter.name)
+      )
+  end
+  adapter.command = adapter_utils.set_env_vars(adapter, command)
   return adapter
 end
 
@@ -218,6 +247,9 @@ function Connection:spawn()
       end),
       stderr = function(_, data)
         table.insert(self._stderr, data)
+        if data then
+          log.debug("agent stderr", data)
+        end
       end,
     },
     vim.schedule_wrap(function(obj)
@@ -228,6 +260,7 @@ function Connection:spawn()
   if not ok then
     return false, ("couldn't start %s: %s"):format(adapter.command[1], result)
   end
+  log.info("agent started", adapter.command)
   process = result
   self._process = process
   return true
@@ -259,6 +292,7 @@ function Connection:on_exit(process, code)
 
   local last = vim.trim(table.concat(self._stderr)):match("([^\n]*)$")
   local message = ("the agent exited with code %s%s"):format(tostring(code), last ~= "" and (": " .. last) or "")
+  log.info(message)
   -- A new process would start with none of the agent's history, so the plugin must start a new session
   if self.session_id then
     self._exited = message
@@ -326,7 +360,7 @@ function Connection:_handshake()
   end
 
   local info
-  info, err = self:request(METHODS.INITIALIZE, self.resolved.parameters, self:_timeout())
+  info, err = self:request(METHODS.INITIALIZE, self.resolved.initialize, self:_timeout())
   if type(info) ~= "table" then
     return false, "the agent couldn't start: " .. (err or "no reply to initialize")
   end
@@ -344,7 +378,7 @@ function Connection:_handshake()
     systemPrompt = self:_system_prompt(),
   }, self:_timeout())
   if type(session) ~= "table" or not session.sessionId then
-    return false, "the agent couldn't start a session: " .. (err or "no session id")
+    return false, "the agent couldn't start a session: " .. (err or "no session id") .. self:_auth_hint()
   end
   self.session_id = session.sessionId
   self.options = session.configOptions or {}
@@ -352,18 +386,38 @@ function Connection:_handshake()
   return self:_apply_options()
 end
 
----Sign in through the adapter's auth handler, or else the agent's own auth method
+---@return string[]
+function Connection:_auth_method_ids()
+  return vim.tbl_map(function(method)
+    return method.id
+  end, self.agent_info.authMethods or {})
+end
+
+---Point the user at the agent's auth methods when they haven't picked one, as an unsigned-in agent can't start a session
+---@return string
+function Connection:_auth_hint()
+  local ids = self:_auth_method_ids()
+  if #ids == 0 or self.resolved.defaults.auth_method then
+    return ""
+  end
+  return (". If the agent needs signing in, give it a credential in env or set defaults.auth_method to one of: %s"):format(
+    table.concat(ids, ", ")
+  )
+end
+
+---Sign in through the adapter's auth handler, or else the auth method the user picked
+---Without either, the agent signs in with what it already has, such as a token in env or its own login
 ---@return boolean success, string|nil err
 function Connection:_authenticate()
-  local auth_methods = self.agent_info.authMethods or {}
-  if #auth_methods == 0 or acp_adapter.call_handler(self.resolved, "auth") == true then
+  local ids = self:_auth_method_ids()
+  if #ids == 0 or acp_adapter.call_handler(self.resolved, "auth") == true then
     return true
   end
 
-  local ids = vim.tbl_map(function(method)
-    return method.id
-  end, auth_methods)
-  local method_id = self.resolved.defaults.auth_method or ids[1]
+  local method_id = self.resolved.defaults.auth_method
+  if not method_id then
+    return true
+  end
   if not vim.tbl_contains(ids, method_id) then
     return false, ("the agent doesn't offer the auth method %s, only %s"):format(method_id, table.concat(ids, ", "))
   end
@@ -464,12 +518,14 @@ end
 function Connection:wait_idle()
   while self.active_prompt do
     local prompt = self.active_prompt
-    vim.defer_fn(function()
-      self:release(prompt)
-    end, self:_timeout())
-    vim.async.await(function(callback)
-      table.insert(self._idle, callback)
+    local released = async.timeout(self:_timeout(), function()
+      vim.async.await(function(callback)
+        table.insert(self._idle, callback)
+      end)
     end)
+    if not released then
+      self:release(prompt)
+    end
   end
 end
 
@@ -507,16 +563,22 @@ local function to_usage(usage)
 end
 
 ---@param adapter agent_sdk.ACPAdapter
----@param opts { model?: string, system_prompt?: string }
+---@param opts { mode?: string, model?: string, system_prompt?: string, thought_level?: string }
 ---@return agent_sdk.Connection
 function Connection.connect(adapter, opts)
   opts = opts or {}
   local agent = vim.deepcopy(adapter)
   agent.defaults = agent.defaults or {}
-  if opts.model then
-    agent.defaults.session_config_options =
-      vim.tbl_extend("force", agent.defaults.session_config_options or {}, { model = opts.model })
-  end
+  local params = vim.tbl_extend("force", agent.parameters or {}, {
+    mode = opts.mode,
+    model = opts.model,
+    thought_level = opts.thought_level,
+  })
+  agent.defaults.session_config_options = vim.tbl_extend(
+    "force",
+    agent.defaults.session_config_options or {},
+    require("agent_sdk.adapters.parameters").translate("acp", params)
+  )
 
   local connection = Connection.new({ adapter = agent, system_prompt = opts.system_prompt })
   local client = {}

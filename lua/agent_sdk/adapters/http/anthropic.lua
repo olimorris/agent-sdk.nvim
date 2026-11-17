@@ -2,6 +2,7 @@
 -- Anthropic - Ported from CodeCompanion's codecompanion/adapters/http/anthropic.lua
 --=============================================================================
 local adapter_utils = require("agent_sdk.adapters.utils")
+local parameters = require("agent_sdk.adapters.parameters")
 
 ---@type agent_sdk.HTTPAdapter
 return {
@@ -30,6 +31,34 @@ return {
     input_tokens = 0,
     output_tokens = 0,
   },
+  model = "claude-sonnet-5",
+  models = {
+    ["claude-fable-5-2"] = {
+      formatted_name = "Fable 5.2",
+      meta = { max_tokens = 64000 },
+      opts = { can_reason = true, has_vision = true },
+    },
+    ["claude-opus-5-5"] = {
+      formatted_name = "Opus 5.5",
+      meta = { max_tokens = 64000 },
+      opts = { can_reason = true, has_vision = true },
+    },
+    ["claude-sonnet-5-5"] = {
+      formatted_name = "Sonnet 5.5",
+      meta = { max_tokens = 64000 },
+      opts = { can_reason = true, has_vision = true },
+    },
+    ["claude-sonnet-5"] = {
+      formatted_name = "Sonnet 5",
+      meta = { max_tokens = 64000 },
+      opts = { can_reason = true, has_vision = true },
+    },
+    ["claude-haiku-5-5"] = {
+      formatted_name = "Haiku 5.5",
+      meta = { max_tokens = 64000 },
+      opts = { can_reason = true, has_vision = true },
+    },
+  },
   handlers = {
     lifecycle = {
       setup = function(self)
@@ -51,20 +80,21 @@ return {
 
     request = {
       build_parameters = function(self, args)
-        local params = args.params
-        local models = adapter_utils.model_choice(self)
-        if self.temp.extended_thinking and (models and models.opts and models.opts.can_reason) then
+        local model = adapter_utils.model_choice(self)
+        local params = parameters.translate("anthropic", args.params, model)
+
+        params.max_tokens = params.max_tokens or vim.tbl_get(model or {}, "meta", "max_tokens") or 4096
+
+        if model and model.opts and model.opts.can_reason then
           -- Ref: https://platform.claude.com/docs/en/build-with-claude/extended-thinking
-          if models.opts.legacy_reasoning then
-            params.thinking = {
-              type = "enabled",
-              budget_tokens = self.temp.thinking_budget,
-            }
-          else
-            params.thinking = {
-              type = "adaptive",
-            }
+          if params.thinking == nil then
+            params.thinking = { type = "adaptive" }
           end
+        else
+          params.thinking = nil
+        end
+
+        if params.thinking and params.thinking.type ~= "disabled" then
           -- Thinking isn't compatible with top_k
           -- Ref: https://platform.claude.com/docs/en/build-with-claude/extended-thinking#feature-compatibility
           params.top_k = nil
@@ -367,110 +397,6 @@ return {
         end
         return formatted
       end,
-    },
-  },
-  schema = {
-    model = {
-      order = 1,
-      mapping = "parameters",
-      type = "enum",
-      desc = "The model that will complete your prompt. See https://docs.anthropic.com/claude/docs/models-overview for additional details and options.",
-      default = "claude-sonnet-5",
-      choices = {
-        ["claude-fable-5-2"] = {
-          formatted_name = "Fable 5.2",
-          opts = { can_reason = true, has_vision = true },
-          meta = { max_tokens = 64000 },
-        },
-        ["claude-opus-5-5"] = {
-          formatted_name = "Opus 5.5",
-          opts = { can_reason = true, has_vision = true },
-          meta = { max_tokens = 64000 },
-        },
-        ["claude-sonnet-5-5"] = {
-          formatted_name = "Sonnet 5.5",
-          opts = { can_reason = true, has_vision = true },
-          meta = { max_tokens = 64000 },
-        },
-        ["claude-sonnet-5"] = {
-          formatted_name = "Sonnet 5",
-          opts = { can_reason = true, has_vision = true },
-          meta = { max_tokens = 64000 },
-        },
-        ["claude-haiku-5-5"] = {
-          formatted_name = "Haiku 5.5",
-          opts = { can_reason = true, has_vision = true },
-          meta = { max_tokens = 64000 },
-        },
-      },
-    },
-    extended_thinking = {
-      order = 3,
-      mapping = "temp",
-      type = "boolean",
-      optional = true,
-      desc = "Enable extended thinking for more thorough reasoning. Requires thinking_budget to be set.",
-      default = function(self)
-        local models = adapter_utils.model_choice(self)
-        return models ~= nil and models.opts ~= nil and models.opts.can_reason == true
-      end,
-      enabled = function(self)
-        local models = adapter_utils.model_choice(self)
-        return models ~= nil and models.opts ~= nil and models.opts.can_reason == true
-      end,
-    },
-    thinking_budget = {
-      order = 4,
-      mapping = "temp",
-      type = "number",
-      optional = true,
-      default = 16000,
-      desc = "The maximum number of tokens to use for thinking when extended_thinking is enabled. Must be less than max_tokens.",
-      enabled = function(self)
-        local models = adapter_utils.model_choice(self)
-        return models ~= nil and models.opts ~= nil and models.opts.legacy_reasoning == true
-      end,
-    },
-    max_tokens = {
-      order = 5,
-      mapping = "parameters",
-      type = "number",
-      optional = true,
-      default = function(self)
-        local models = adapter_utils.model_choice(self)
-        if models and models.meta and models.meta.max_tokens then
-          return models.meta.max_tokens
-        end
-        return 4096
-      end,
-      desc = "The maximum number of tokens to generate before stopping.",
-    },
-    top_p = {
-      order = 7,
-      mapping = "parameters",
-      type = "number",
-      optional = true,
-      default = nil,
-      desc = "Computes the cumulative distribution over all the options for each subsequent token in decreasing probability order and cuts it off once it reaches a particular probability specified by top_p",
-    },
-    top_k = {
-      order = 8,
-      mapping = "parameters",
-      type = "number",
-      optional = true,
-      default = nil,
-      desc = "Only sample from the top K options for each subsequent token. Use top_k to remove long tail low probability responses",
-    },
-    stop_sequences = {
-      order = 9,
-      mapping = "parameters",
-      type = "list",
-      optional = true,
-      default = nil,
-      subtype = {
-        type = "string",
-      },
-      desc = "Sequences where the API will stop generating further tokens",
     },
   },
 }

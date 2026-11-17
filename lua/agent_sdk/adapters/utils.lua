@@ -1,3 +1,5 @@
+local async = require("agent_sdk.utils.async")
+
 local M = {}
 
 ---Filter a message down to the allowed keys, returning a new table
@@ -108,16 +110,15 @@ end
 ---@return string|nil, string|nil
 local function read_file(var)
   local path = vim.fs.normalize(var:sub(6))
-  local file = io.open(path, "rb")
-  if not file then
+  local content = async.read_file(path)
+  if not content then
     return nil, ("agent-sdk.nvim: could not read the file %s"):format(path)
   end
-  local content = file:read("*a")
-  file:close()
   return (content:gsub("%s+$", ""))
 end
 
 local cmd_cache = {}
+local cmd_running = {}
 
 ---Run the command in the environment variable, reusing the output of an earlier successful run
 ---@param opts { var: string, timeout: number }
@@ -130,17 +131,36 @@ local function run_cmd(opts)
     return cached[cwd]
   end
 
-  local cmd = opts.var:sub(5)
-  local result = vim.system({ vim.o.shell, vim.o.shellcmdflag, cmd }, { text = true, timeout = opts.timeout }):wait()
-  local output = (result.stdout or ""):gsub("%s+$", "")
-  if result.code ~= 0 or output == "" then
-    local detail = vim.trim(result.stderr or "")
-    return nil, ("agent-sdk.nvim: the command `%s` failed%s"):format(cmd, detail ~= "" and ": " .. detail or "")
+  -- Two prompts that start together share one run, so a password manager asks once
+  local key = opts.var .. "\0" .. cwd
+  if not cmd_running[key] then
+    cmd_running[key] = vim
+      .async
+      .run(function()
+        local cmd = opts.var:sub(5)
+        local result = async.system({ vim.o.shell, vim.o.shellcmdflag, cmd }, { text = true, timeout = opts.timeout })
+        local output = (result.stdout or ""):gsub("%s+$", "")
+        -- vim.system reports a command it killed for running too long with code 124
+        if result.code == 124 then
+          return nil, ("agent-sdk.nvim: the command `%s` timed out after %g seconds"):format(cmd, opts.timeout / 1000)
+        end
+        if result.code ~= 0 or output == "" then
+          local detail = vim.trim(result.stderr or "")
+          return nil, ("agent-sdk.nvim: the command `%s` failed%s"):format(cmd, detail ~= "" and ": " .. detail or "")
+        end
+        cmd_cache[opts.var] = cmd_cache[opts.var] or {}
+        cmd_cache[opts.var][cwd] = output
+        return output
+      end)
+      -- Detached, so closing the prompt that started it doesn't cancel the others waiting on it
+      :detach()
   end
-
-  cmd_cache[opts.var] = cmd_cache[opts.var] or {}
-  cmd_cache[opts.var][cwd] = output
-  return output
+  local running = cmd_running[key]
+  local output, err = vim.async.await(running)
+  if cmd_running[key] == running then
+    cmd_running[key] = nil
+  end
+  return output, err
 end
 
 ---Drop the cached output of `cmd:` env values so the next request runs them again
@@ -192,7 +212,8 @@ local function replace_var(adapter, opts)
   return result
 end
 
----Resolve the adapter's env into `adapter.env_replaced`
+---Resolve the adapter's env into `adapter.env_replaced`. Must run inside a vim.async task
+---@async
 ---@param adapter table
 ---@param args? { timeout: number }
 ---@return table|nil adapter, string|nil err
@@ -202,7 +223,7 @@ function M.get_env_vars(adapter, args)
   for k, v in pairs(adapter.env or {}) do
     local value, err
     if type(v) == "string" and is_cmd(v) then
-      value, err = run_cmd({ var = v, timeout = (args and args.timeout) or 5000 })
+      value, err = run_cmd({ var = v, timeout = (args and args.timeout) or 30000 })
     elseif type(v) == "string" and is_file(v) then
       value, err = read_file(v)
     elseif type(v) == "string" and os.getenv(v) then
@@ -255,23 +276,22 @@ function M.pairing_id(tool_call)
   return tool_call.call_id or tool_call.id
 end
 
----Obtain the model from the given adapter's schema
+---The model the request will use
 ---@param adapter table
 ---@return string|nil
 function M.model(adapter)
-  local default = adapter.schema and adapter.schema.model and adapter.schema.model.default
-  return type(default) == "string" and default or nil
+  local model = adapter.parameters and adapter.parameters.model or adapter.model
+  return type(model) == "string" and model or nil
 end
 
----Return the model's entry in the schema's choices
+---The model's entry in the adapter's `models`
 ---@param adapter table
----@return table|nil
+---@return agent_sdk.Model|nil
 function M.model_choice(adapter)
-  local choices = adapter.schema and adapter.schema.model and adapter.schema.model.choices
-  if type(choices) ~= "table" then
+  if type(adapter.models) ~= "table" then
     return nil
   end
-  return choices[M.model(adapter)]
+  return adapter.models[M.model(adapter)]
 end
 
 return M

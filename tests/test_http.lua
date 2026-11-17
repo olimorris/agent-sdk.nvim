@@ -10,9 +10,10 @@ local function stub(name)
 end
 
 local function anthropic(overrides)
-  return require("agent_sdk.adapters").extend(
-    "anthropic",
-    vim.tbl_deep_extend("force", { env = { api_key = "cmd:printf dummy-key" } }, overrides or {})
+  return vim.tbl_deep_extend(
+    "force",
+    { base = "anthropic", env = { api_key = "cmd:printf dummy-key" } },
+    overrides or {}
   )
 end
 

@@ -10,13 +10,15 @@ A session is one conversation with a model or agent. You give it an adapter and 
 ```lua
 local session = sdk.session({
   adapter = adapter,
+  mode = "plan", -- optional, ACP agents only
   model = "claude-opus-5-5", -- optional, nil keeps the user's default
-  system_prompt = "You review code. Be brief.", -- optional
   on = { ... },
+  system_prompt = "You review code. Be brief.", -- optional
+  thought_level = "high", -- optional
 })
 ```
 
-`sdk.session()` takes the adapter object, not its name, so you can pass a modified deep copy. You can't change the user's own config.
+`mode`, `model` and `thought_level` replace the user's [parameters](/reference/adapters#setting-them-per-session) for this session. `sdk.session()` takes the adapter object, not its name, so you can pass a modified deep copy. You can't change the user's own config.
 
 ## Handlers
 
