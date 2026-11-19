@@ -1,11 +1,60 @@
 ---
 title: "Answer tool calls from a model or agent"
 sidebarTitle: "Tool calls"
-description: "Handle tool calls in Agent SDK. On HTTP your plugin runs the tool and answers the call. On ACP the agent runs it and your plugin follows along."
-keywords: ["tool calls", "tool_call", "tool_update", "respond", "fail"]
+description: "Give a model your plugin's tools and answer its tool calls in Agent SDK. On HTTP your plugin runs the tool and answers the call. On ACP the agent runs it and your plugin follows along."
+keywords: ["tools", "tool calls", "tool definitions", "json schema", "tool_call", "tool_update", "respond", "fail"]
 ---
 
 A tool call is the model asking your plugin for something, so it arrives in `on.request.tool_call`. A prompt isn't done while a tool call is unanswered. Your plugin answers, and the same prompt carries on.
+
+## Giving the model your tools
+
+A model can only call the tools it's told about. List them in the session's `tools`:
+
+```lua
+local session = sdk.session({
+  adapter = adapter,
+  tools = {
+    {
+      name = "read_file",
+      description = "Read a file from the user's project, including unsaved changes",
+      parameters = {
+        type = "object",
+        properties = {
+          path = { type = "string", description = "Relative to the project root" },
+        },
+        required = { "path" },
+      },
+    },
+  },
+  on = { ... },
+})
+```
+
+| Field | |
+| --- | --- |
+| `name` | Letters, digits, `_` and `-`, starting with a letter or `_`, at most 64 long. Unique in the list |
+| `description` | What the tool does and when to use it. The model reads this to decide |
+| `parameters` | Optional. A [JSON Schema](https://json-schema.org/understanding-json-schema) with `type = "object"`. Leave it out for a tool that takes no arguments |
+
+The SDK sends the tools with every request in the session, in each provider's own format. `sdk.session()` raises an error when a tool breaks one of the rules above, so a mistake shows up in your plugin and not as a provider's error.
+
+Pass `tools` whatever the adapter. An ACP agent runs its own tools, so it ignores yours. Check `adapter.capabilities.tools` if your plugin needs the model to call them: an adapter without tool support doesn't send them.
+
+### How each API receives them
+
+The format is the one the APIs share: a name, a description and a JSON Schema. Each adapter only moves the fields:
+
+| API | Sent as |
+| --- | --- |
+| Anthropic | `{ name, description, input_schema = parameters }` |
+| OpenAI Chat Completions | `{ type = "function", function = { name, description, parameters } }` |
+| OpenAI Responses | `{ type = "function", name, description, parameters }` |
+| Gemini | `{ functionDeclarations = { { name, description, parametersJsonSchema = parameters } } }` |
+
+The schema itself is sent unchanged, so use the JSON Schema features every provider you support accepts.
+
+## Answering a call
 
 ```lua
 on = {
@@ -25,13 +74,7 @@ on = {
 }
 ```
 
-`read_file` is your plugin's own function, returning a file's text including unsaved changes.
-
-<Note>
-The API for giving an HTTP model your plugin's tool definitions isn't built yet. Until it is, only the [test adapter](/reference/test-adapter) produces tool calls on HTTP.
-</Note>
-
-## Answering a call
+`read_file` is your plugin's own function, returning a file's text including unsaved changes. `data.name` is the `name` from your tool's definition.
 
 When `data.needs_result` is `true`, your handler must call `data.respond(content)` or `data.fail(message)`. Once every call in a reply is answered, the SDK sends the results and the prompt carries on. Your plugin sees one `done`, with the whole answer.
 

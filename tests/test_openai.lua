@@ -53,6 +53,7 @@ local function make(replies, opts)
     model = opts.model,
     system_prompt = opts.system_prompt,
     on = opts.on,
+    tools = opts.tools,
   })
 end
 
@@ -250,6 +251,39 @@ T["extending"]["an override can call the base adapter's handler"] = function()
   local body = fake.calls[1].body
   eq(body.session_id, "abc")
   eq(body.stream, true)
+end
+
+local READ_FILE = {
+  name = "read_file",
+  description = "Read a file",
+  parameters = { type = "object", properties = { path = { type = "string" } }, required = { "path" } },
+}
+
+T["the session's tools are sent in Chat Completions' format"] = function()
+  local session = make(
+    { stub("openai_tools_streaming.txt"), done },
+    { on = select(2, recorder()), tools = { READ_FILE } }
+  )
+  session:prompt("weather?"):wait(1000)
+
+  local expected = {
+    {
+      type = "function",
+      ["function"] = {
+        name = "read_file",
+        description = "Read a file",
+        parameters = { type = "object", properties = { path = { type = "string" } }, required = { "path" } },
+      },
+    },
+  }
+  eq(fake.calls[1].body.tools, expected)
+  eq(fake.calls[2].body.tools, expected)
+end
+
+T["a session without tools sends no tools field"] = function()
+  local session = make({ stub("openai_streaming.txt") }, { on = select(2, recorder()) })
+  session:prompt("hi"):wait(1000)
+  eq(fake.calls[1].body.tools, nil)
 end
 
 return T

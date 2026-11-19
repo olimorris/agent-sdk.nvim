@@ -3,6 +3,7 @@
 --=============================================================================
 local adapter_utils = require("agent_sdk.adapters.utils")
 local parameters = require("agent_sdk.adapters.parameters")
+local tool_formats = require("agent_sdk.adapters.tools")
 
 local CONSTANTS = {
   STANDARD_MESSAGE_FIELDS = {
@@ -263,22 +264,10 @@ return {
       end,
 
       build_tools = function(self, args)
-        local tools = args.tools
-        if not self.opts.tools or not tools then
+        if not self.opts.tools then
           return nil
         end
-        if vim.tbl_count(tools) == 0 then
-          return nil
-        end
-
-        local transformed = {}
-        for _, tool in pairs(tools) do
-          for _, schema in pairs(tool) do
-            table.insert(transformed, schema)
-          end
-        end
-
-        return { tools = transformed }
+        return { tools = tool_formats.translate("openai", args.tools) }
       end,
     },
 

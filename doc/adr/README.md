@@ -22,3 +22,4 @@ To add one, copy the next number and write a title and a short paragraph. Add "C
 - [0016](0016-parameters-are-shared-by-http-and-acp.md) - HTTP adapters and ACP agents share `parameters`
 - [0017](0017-one-acp-adapter.md) - One ACP adapter, and agents are config
 - [0018](0018-adapters-name-their-base.md) - Adapters name their base instead of calling extend()
+- [0019](0019-tools-are-defined-once-in-the-format-the-apis-share.md) - Tools are defined once, in the format the APIs share

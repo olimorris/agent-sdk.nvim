@@ -41,7 +41,7 @@ When a conversation starts:
 1. Resolve the adapter with `sdk.adapter(name)`. If it returns `nil, err`, show `err` with `vim.notify` at `ERROR` and stop
 2. If the user set a model, check it with `adapter:has_model(model)` and warn if it returns `false`
 3. Turn off features the adapter can't support, using `adapter.capabilities`
-4. Start a session with `sdk.session()`, with the session's handlers in `on`
+4. Start a session with `sdk.session()`, with the session's handlers in `on`, and the conversation's tools in `tools` if the model needs to call any
 
 Resolve the adapter when the conversation starts rather than in the plugin's setup, as the user may call `agent_sdk.setup()` after the plugin's.
 
@@ -73,6 +73,7 @@ Write tests with the test adapter, added through `agent_sdk.setup()` as a user w
 - A reply that streams and ends in `done`
 - A reply that ends in `error`
 - For each permission policy, one permission request the policy allows and one it rejects, checked through `scripted.responses`
+- For each conversation with tools, that `scripted.requests[1].tools` holds them, and a scripted `tool_call` the plugin answers
 
 Done when the tests pass with no network access and no API keys set.
 
@@ -103,6 +104,7 @@ local session = sdk.session({
   on = { ... }, -- handlers for every prompt in the session
   system_prompt = "...", -- optional
   thought_level = "high", -- optional: mode, model and thought_level map to every adapter, see doc/reference/adapters.mdx
+  tools = { ... }, -- optional, see Tools
 })
 ```
 
@@ -114,6 +116,7 @@ local session = sdk.session({
 | `session:ask(content, opts)` | The same, inside a `vim.async` task. Returns `reply, err` |
 | `session:close()` | Stops any reply in progress and ends the session. For ACP, stops the agent's process |
 | `session.messages` | The history, read-only. On ACP, a record of what the SDK saw |
+| `session.tools` | The session's tools, read-only |
 | `session:set_messages(messages)` | Replaces the history and returns `true`. On ACP, changes nothing and returns `false, err` |
 
 `content` is a string, or a list of blocks like `{ type = "text", text = "..." }`.
@@ -122,6 +125,30 @@ local session = sdk.session({
 
 - `stream`: `false` delivers every event in one burst once the reply is complete. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Defaults to `true`
 - `on`: handlers for this prompt only. Each replaces the session's handler for the same event or request
+
+### Tools
+
+`tools` lists the tools the model can call, sent with every request in the session:
+
+```lua
+tools = {
+  {
+    name = "read_file",
+    description = "Read a file from the user's project, including unsaved changes",
+    parameters = {
+      type = "object",
+      properties = { path = { type = "string" } },
+      required = { "path" },
+    },
+  },
+}
+```
+
+- `name`: letters, digits, `_` and `-`, starting with a letter or `_`, at most 64 long, unique in the list
+- `description`: what the tool does and when to use it
+- `parameters`: optional, a JSON Schema with `type = "object"`
+
+`sdk.session()` raises an error when a tool breaks these rules. The SDK translates the tools into each provider's format. An ACP agent ignores them, as it runs its own tools, so always pass them. An adapter whose `capabilities.tools` is `false` doesn't send them.
 
 ### Events
 
@@ -179,7 +206,7 @@ The plugin's code is the same for both, except:
 
 - An ACP agent keeps its own history. `session.messages` is a record of the prompts, text, reasoning and tool calls the SDK saw, and is never sent back to the agent. `session:set_messages()` changes nothing and returns `false, err`
 - On ACP, `system_prompt` is added to the agent's own instructions. On HTTP, it is the whole system prompt
-- On ACP, tool calls have `needs_result = false`: the agent runs the tool itself, and `data.respond()` and `data.fail()` do nothing. On HTTP, `needs_result` is `true` and the plugin owes a result. The API for giving the model the plugin's tool definitions isn't designed yet, so stop and ask the user if the plugin needs tools
+- On ACP, `tools` is ignored and tool calls have `needs_result = false`: the agent runs its own tools, and `data.respond()` and `data.fail()` do nothing. On HTTP, the model calls the session's `tools`, `needs_result` is `true` and the plugin owes a result
 - An ACP agent reads files, writes files and runs commands itself, behind permission requests. It can't do any of these through Neovim, so it doesn't see unsaved changes
 - The SDK starts an ACP agent's process on the first prompt, so the first reply is slower
 - If an ACP agent's process exits, the agent's history goes with it. The prompt in progress ends in an `error`, and so does every later prompt in that session. Start a new session to carry on

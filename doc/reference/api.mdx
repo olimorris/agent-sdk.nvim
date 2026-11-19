@@ -40,6 +40,7 @@ local session = sdk.session({
   on = { ... }, -- handlers for every prompt in the session
   system_prompt = "...", -- optional
   thought_level = "high", -- optional, see /reference/adapters
+  tools = { ... }, -- optional, the tools the model can call, see /reference/tool-calls
 })
 ```
 
@@ -51,6 +52,7 @@ local session = sdk.session({
 | `session:ask(content, opts)` | The same, inside a `vim.async` task. Returns `reply, err` |
 | `session:close()` | Stops any reply in progress and ends the session. For ACP, stops the agent's process |
 | `session.messages` | The history, read-only. On ACP, a record of what the SDK saw |
+| `session.tools` | The session's tools, read-only |
 | `session:set_messages(messages)` | Replaces the history and returns `true`. On ACP, changes nothing and returns `false, err` |
 
 `content` is a string, or a list of blocks like `{ type = "text", text = "..." }`.

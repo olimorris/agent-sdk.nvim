@@ -3,6 +3,7 @@
 --=============================================================================
 local adapter_utils = require("agent_sdk.adapters.utils")
 local parameters = require("agent_sdk.adapters.parameters")
+local tool_formats = require("agent_sdk.adapters.tools")
 
 ---@type agent_sdk.HTTPAdapter
 return {
@@ -237,6 +238,13 @@ return {
           -- Ref: https://platform.claude.com/docs/en/build-with-claude/prompt-caching#automatic-caching
           cache_control = { type = "ephemeral" },
         }
+      end,
+
+      build_tools = function(self, args)
+        if not self.opts.tools then
+          return nil
+        end
+        return { tools = tool_formats.translate("anthropic", args.tools) }
       end,
 
       build_reasoning = function(self, args)

@@ -35,6 +35,7 @@ Some differences can't be hidden, because one side can't do what the other does.
 | History | The SDK owns it and sends it on every request | The agent owns it. `session.messages` is a record of what the SDK saw, never sent back |
 | `session:set_messages()` | Replaces the history and returns `true` | Changes nothing and returns `false, err` |
 | `system_prompt` | The whole system prompt | Added to the agent's own instructions |
+| `tools` | Sent to the model with every request | Ignored. The agent has its own tools |
 | Tool calls | `needs_result = true`. Your plugin runs the tool and answers | `needs_result = false`. The agent runs the tool, and `data.respond()` and `data.fail()` do nothing |
 | `data.name` | The tool's name | `nil`. Use `data.title` and `data.kind` |
 | Files and commands | Only through your plugin's tools | The agent reads, writes and runs commands itself, behind [permission requests](/reference/permissions) |

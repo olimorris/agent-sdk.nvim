@@ -10,6 +10,7 @@ local M = {}
 ---@field stream boolean
 ---@field system_prompt string?
 ---@field thought_level string?
+---@field tools agent_sdk.Tool[]?
 
 ---@class agent_sdk.Connection
 ---@field request fun(self: agent_sdk.Connection, request: agent_sdk.Request, emit: fun(event: table)): fun()?
@@ -31,6 +32,7 @@ local M = {}
 ---@field on agent_sdk.Handlers?
 ---@field system_prompt string?
 ---@field thought_level string?
+---@field tools agent_sdk.Tool[]? Sent to HTTP adapters with every request. ACP agents run their own tools, so ignore it
 
 ---@class agent_sdk.PromptOpts
 ---@field stream boolean?
@@ -48,6 +50,7 @@ local M = {}
 ---@field model string?
 ---@field system_prompt string?
 ---@field on agent_sdk.Handlers
+---@field tools agent_sdk.Tool[]?
 ---@field closed boolean
 local Session = {}
 Session.__index = Session
@@ -115,6 +118,7 @@ local function new_turn(session, content, opts)
     stream = turn.stream,
     system_prompt = session.system_prompt,
     thought_level = session.thought_level,
+    tools = session.tools,
   }
   if session.adapter.type == "http" then
     turn.request.messages = vim.deepcopy(session.messages)
@@ -237,6 +241,7 @@ local function send_tool_results(session, turn)
     stream = turn.stream,
     system_prompt = session.system_prompt,
     thought_level = session.thought_level,
+    tools = session.tools,
   }
   send(session, turn)
 end
@@ -476,6 +481,12 @@ function M.new(opts)
   if type(adapter.connect) ~= "function" then
     error("agent-sdk.nvim: adapter has no connect function", 2)
   end
+  if opts.tools ~= nil then
+    local ok, err = require("agent_sdk.adapters.tools").validate(opts.tools)
+    if not ok then
+      error("agent-sdk.nvim: " .. err, 2)
+    end
+  end
 
   return setmetatable({
     adapter = adapter,
@@ -487,6 +498,7 @@ function M.new(opts)
     queue = {},
     system_prompt = opts.system_prompt,
     thought_level = opts.thought_level,
+    tools = opts.tools and vim.deepcopy(opts.tools),
   }, Session)
 end
 

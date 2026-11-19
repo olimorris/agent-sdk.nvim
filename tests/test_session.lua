@@ -973,6 +973,50 @@ T["the session's mode and thought_level reach the adapter"] = function()
   eq(scripted.requests[1].mode, "plan")
 end
 
+local TOOLS = { { name = "read_file", description = "Read a file", parameters = { type = "object" } } }
+
+T["the session's tools reach every request of a prompt"] = function()
+  local scripted = test.adapter({
+    replies = {
+      { { type = "tool_call", id = "a", name = "read_file", arguments = {} }, DONE },
+      { DONE },
+    },
+  })
+  sdk.setup({ adapters = { scripted = scripted } })
+  local session = sdk.session({
+    adapter = sdk.adapter("scripted"),
+    tools = TOOLS,
+    on = {
+      request = {
+        tool_call = function(data)
+          data.respond("x")
+        end,
+      },
+    },
+  })
+  session:prompt("a"):wait(1000)
+  eq(#scripted.requests, 2)
+  eq(scripted.requests[1].tools, TOOLS)
+  eq(scripted.requests[2].tools, TOOLS)
+end
+
+T["changing the plugin's tool table after the session starts changes nothing"] = function()
+  local tools = vim.deepcopy(TOOLS)
+  local scripted = test.adapter({ replies = { { DONE } } })
+  sdk.setup({ adapters = { scripted = scripted } })
+  local session = sdk.session({ adapter = sdk.adapter("scripted"), tools = tools })
+  tools[1].name = "changed"
+  session:prompt("a"):wait(1000)
+  eq(scripted.requests[1].tools[1].name, "read_file")
+end
+
+T["invalid tools raise when the session is created"] = function()
+  sdk.setup({ adapters = { scripted = test.adapter() } })
+  MiniTest.expect.error(function()
+    sdk.session({ adapter = sdk.adapter("scripted"), tools = { { name = "read file", description = "d" } } })
+  end, "tool 1 needs a name")
+end
+
 T["reasoning formed by the adapter is what the history keeps"] = function()
   local formed = { content = "r", _data = { signature = "sig" } }
   local _, session =

@@ -35,6 +35,8 @@ replies = {
 
 A reply with a tool call is followed by a second request once the call is answered, so script both replies.
 
+`scripted.requests` lists every request the adapter received, in order. Check `scripted.requests[1].tools` to test that your plugin gave the model its tools.
+
 ## Options
 
 | Option | |

@@ -10,6 +10,7 @@ local log = require("agent_sdk.log")
 
 ---@class agent_sdk.HTTPPayload
 ---@field messages table
+---@field tools? agent_sdk.Tool[]
 
 ---@class agent_sdk.HTTPClient
 ---@field adapter agent_sdk.HTTPAdapter
@@ -92,6 +93,7 @@ function Client.merge_body(adapter, payload)
       messages = payload.messages,
     }) or {},
     adapters.call_handler(adapter, "build_messages", { messages = payload.messages }) or {},
+    payload.tools and adapters.call_handler(adapter, "build_tools", { tools = payload.tools }) or {},
     adapter.body and adapter.body or {},
     adapters.call_handler(adapter, "build_body", { payload = payload }) or {}
   )
@@ -359,7 +361,10 @@ function M.connect(adapter)
     }
 
     local task = vim.async.run(function()
-      client:request({ messages = messages }, actions)
+      client:request(
+        { messages = messages, tools = request.tools and #request.tools > 0 and request.tools or nil },
+        actions
+      )
     end)
     -- A Lua error inside the request would otherwise end the task without a word to the plugin
     task:on_complete(function(err)

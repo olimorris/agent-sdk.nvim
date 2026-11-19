@@ -57,6 +57,7 @@ local function make(replies, opts)
     model = opts.model,
     system_prompt = opts.system_prompt,
     on = opts.on,
+    tools = opts.tools,
   })
 end
 
@@ -303,6 +304,31 @@ T["parameters: the user's model replaces the adapter's default"] = function()
     :prompt("hi")
     :wait(1000)
   eq(fake.calls[1].body.model, "claude-opus-5-5")
+end
+
+local READ_FILE = {
+  name = "read_file",
+  description = "Read a file",
+  parameters = { type = "object", properties = { path = { type = "string" } }, required = { "path" } },
+}
+
+T["the session's tools are sent in Anthropic's format"] = function()
+  local session = make({ stub("anthropic_text.txt") }, { on = select(2, recorder()), tools = { READ_FILE } })
+  session:prompt("hi"):wait(1000)
+
+  eq(fake.calls[1].body.tools, {
+    {
+      name = "read_file",
+      description = "Read a file",
+      input_schema = { type = "object", properties = { path = { type = "string" } }, required = { "path" } },
+    },
+  })
+end
+
+T["a session without tools sends no tools field"] = function()
+  local session = make({ stub("anthropic_text.txt") }, { on = select(2, recorder()) })
+  session:prompt("hi"):wait(1000)
+  eq(fake.calls[1].body.tools, nil)
 end
 
 return T

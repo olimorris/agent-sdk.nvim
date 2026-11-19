@@ -15,8 +15,11 @@ local session = sdk.session({
   on = { ... },
   system_prompt = "You review code. Be brief.", -- optional
   thought_level = "high", -- optional
+  tools = { ... }, -- optional
 })
 ```
+
+`tools` lists the tools the model can call, for every prompt in the session. See [Tool calls](/reference/tool-calls#giving-the-model-your-tools).
 
 `mode`, `model` and `thought_level` replace the user's [parameters](/reference/adapters#setting-them-per-session) for this session. `sdk.session()` takes the adapter object, not its name, so you can pass a modified deep copy. You can't change the user's own config.
 

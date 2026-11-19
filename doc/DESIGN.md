@@ -98,6 +98,14 @@ Requests ask the plugin for something, and the reply waits for its answer. They 
 
 Every adapter supports `stream = false`. The plugin gets the same events in one burst once the reply is complete, so its code doesn't change between modes. A reply with a tool call arrives as one burst up to the tool call, and another once the call is answered. Where a provider supports only one mode, the SDK covers the other: it collects a stream into one reply, or sends a complete reply as one burst of events.
 
+A plugin gives the model its tools in the session's `tools`: a list of `{ name, description, parameters }`, with `parameters` a JSON Schema ([0019](adr/0019-tools-are-defined-once-in-the-format-the-apis-share.md)).
+
+- Each API's translation is a function in `lua/agent_sdk/adapters/tools.lua`, and an adapter calls `tools.translate()` in `build_tools`. Anthropic, OpenAI Chat Completions, OpenAI Responses and Gemini are there, so the format is proven against the adapters still to come
+- The schema is sent unchanged. Gemini takes it in `parametersJsonSchema`, so nothing is converted to its OpenAPI subset
+- `sdk.session()` raises on a tool every API wouldn't accept: a bad or duplicate name, no description, or `parameters` that isn't an object schema
+- Tools are fixed for the session, as Anthropic refuses a request whose history holds tool calls but which defines no tools
+- An ACP agent ignores `tools`
+
 Tool calls are passed straight through to the plugin's `on.request.tool_call` handler.
 
 - A prompt isn't done while a tool call is unanswered. The plugin answers on the event with `data.respond(content)` or `data.fail(message)`
@@ -156,13 +164,12 @@ The SDK ships a public test adapter that replays a scripted stream of events, so
 - Handler naming and sections
 - When CodeCompanion moves onto the SDK, and what its shim looks like
 - Moving the plugins that use `codecompanion.http` and `codecompanion.adapters` to the SDK
-- How a plugin gives the model its tool definitions on HTTP. Until this exists, only the test adapter produces tool calls on HTTP
 
 ## Further ahead
 
 Ideas only. Not designed yet.
 
-- **Tool definitions:** plugins send their own. System prompts are already a session option
+- **Tools on ACP agents:** give an agent the plugin's tools over MCP, so `tools` works on both transports
 - **Skills:** users define skills, and plugin authors can ship skills with their plugin. How they are included in a request is still to work out. Skills plus curated tool definitions would let a plugin author ship a well-tuned plugin
 - **Agent cards:** like a model card, every plugin built on the SDK publishes one. It states the tools it runs on the user's machine and the risk of each
 - **Safety:** the SDK makes it easy for a plugin to have an agent run tools on the user's machine. A malicious plugin could use that to take control of it. Agent cards are one part of the answer, and this needs a lot of care

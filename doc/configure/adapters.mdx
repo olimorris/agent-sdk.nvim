@@ -166,6 +166,7 @@ handlers = {
 | `lifecycle.setup` | Before each request | `false` to stop the request |
 | `request.build_parameters` | Building the body | The request's parameters |
 | `request.build_messages` | Building the body | `{ messages = ... }`, plus any other body fields |
+| `request.build_tools` | Building the body, when the session has tools | `{ tools = ... }`, in the provider's format |
 | `request.build_body` | Building the body | Extra body fields |
 | `response.parse_tokens` | For each chunk | The total token count, or `nil` |
 | `response.parse_chat` | For each chunk | `{ status = "success", output = { content, reasoning } }`. Adds tool calls to `args.tools` |
